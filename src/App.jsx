@@ -540,10 +540,11 @@ Return ONLY valid JSON (no markdown):
         method:"POST",
         headers:{
           "Content-Type":"application/json",
+          "anthropic-version":"2023-06-01",
           "anthropic-dangerous-direct-browser-access":"true"
         },
         body:JSON.stringify({
-          model:"claude-sonnet-4-6",
+          model:"claude-sonnet-4-5-20251001",
           max_tokens:1024,
           messages:[{role:"user",content:prompt}]
         })
