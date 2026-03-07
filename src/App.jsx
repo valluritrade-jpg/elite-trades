@@ -50,9 +50,22 @@ async function storageSet(key, val, shared) {
 async function storageDel(key, shared) {
   try { await window.storage.delete(key, shared || false); } catch(e) {}
 }
+// Built-in default admin — always available even if storage is empty
+const DEFAULT_ADMIN = {
+  "admin@elitetrades.com": {
+    name: "Admin",
+    email: "admin@elitetrades.com",
+    password: btoa("EliteTrades1!"),
+    isAdmin: true,
+    createdAt: "2024-01-01T00:00:00.000Z"
+  }
+};
+
 async function getUsers() {
   const r = await storageGet("et_users", false);
-  return r !== null ? r : {};
+  const stored = r !== null ? r : {};
+  // Merge so default admin always exists unless overwritten
+  return Object.assign({}, DEFAULT_ADMIN, stored);
 }
 async function saveUsers(u) { return storageSet("et_users", u, false); }
 async function getSession() { return storageGet("et_session", false); }
@@ -94,24 +107,212 @@ function Badge({label,color=G.gold}){return <span style={{fontFamily:G.mono,font
 function TypeBadge({type}){const colors={Crypto:"#60a5fa",Stock:"#4ade80",ETF:"#a78bfa",Forex:"#fb923c",Commodity:"#fbbf24",Index:"#e879f9",Other:G.muted};return <Badge label={type} color={colors[type]??G.muted}/>;}
 
 // Ticker
-const TICKERS=[
-  {sym:"BTC/USD",val:"67,412",chg:"+2.41%"},{sym:"ETH/USD",val:"3,521",chg:"+1.88%"},
-  {sym:"AAPL",val:"213.45",chg:"-0.32%"},{sym:"SPY",val:"521.60",chg:"+0.74%"},
-  {sym:"TSLA",val:"178.90",chg:"+3.21%"},{sym:"NVDA",val:"875.20",chg:"+4.10%"},
-  {sym:"GOLD",val:"2,341",chg:"+0.55%"},{sym:"EUR/USD",val:"1.0872",chg:"-0.12%"},
-];
-function TickerTape(){
-  return <div style={{background:"#030d1e",borderBottom:`1px solid ${G.gold}33`,overflow:"hidden",height:32,display:"flex",alignItems:"center"}}>
-    <div style={{display:"flex",gap:48,animation:"ticker 30s linear infinite",whiteSpace:"nowrap"}}>
-      {[...TICKERS,...TICKERS].map((t,i)=>(
-        <span key={i} style={{fontFamily:G.mono,fontSize:12}}>
-          <span style={{color:G.gold,fontWeight:700}}>{t.sym}</span>
-          <span style={{color:G.text,margin:"0 6px"}}>{t.val}</span>
-          <span style={{color:t.chg.startsWith("+")?G.green:G.red}}>{t.chg}</span>
-        </span>
-      ))}
+// ─── Live Ticker ──────────────────────────────────────────────────────────────
+// Finnhub API key — set VITE_FINNHUB_API_KEY in GitHub Secrets for deployed site
+// In artifact preview, enter it via the key button in the ticker bar
+const VITE_FINNHUB_KEY = (typeof import.meta !== "undefined" && import.meta.env?.VITE_FINNHUB_API_KEY)
+  ? import.meta.env.VITE_FINNHUB_API_KEY : null;
+
+// Seed prices shown instantly before live data loads
+const SEED = {
+  "BTC/USD": { price: 97500,  prev: 96200,  dp: +1.35 },
+  "ETH/USD": { price: 2680,   prev: 2640,   dp: +1.52 },
+  "AAPL":    { price: 213.50, prev: 211.80, dp: +0.80 },
+  "SPY":     { price: 562.00, prev: 558.40, dp: +0.64 },
+  "TSLA":    { price: 248.50, prev: 244.10, dp: +1.80 },
+  "NVDA":    { price: 118.20, prev: 115.60, dp: +2.25 },
+  "GOLD":    { price: 3120.0, prev: 3095.0, dp: +0.81 },
+  "EUR/USD": { price: 1.0835, prev: 1.0812, dp: +0.21 },
+};
+
+const SYMBOLS = ["BTC/USD","ETH/USD","AAPL","SPY","TSLA","NVDA","GOLD","EUR/USD"];
+
+// Finnhub symbol map
+const FH_MAP = {
+  "AAPL":    "AAPL",
+  "SPY":     "SPY",
+  "TSLA":    "TSLA",
+  "NVDA":    "NVDA",
+  "GOLD":    "OANDA:XAU_USD",
+  "EUR/USD": "OANDA:EUR_USD",
+};
+
+function fmtPrice(sym, val) {
+  if (val === null || val === undefined || isNaN(val)) return "--";
+  if (sym === "EUR/USD") return parseFloat(val).toFixed(4);
+  if (sym === "GOLD" || val >= 1000) return parseFloat(val).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return parseFloat(val).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function fmtPct(pct) {
+  if (pct === null || pct === undefined || isNaN(pct)) return "--";
+  const n = parseFloat(pct);
+  return (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
+}
+
+function seedTickers() {
+  return SYMBOLS.map(sym => {
+    const s = SEED[sym];
+    const j = 1 + (Math.random() - 0.5) * 0.003;
+    const price = s.price * j;
+    const dp = ((price - s.prev) / s.prev) * 100;
+    return { sym, val: fmtPrice(sym, price), chg: fmtPct(dp), dp };
+  });
+}
+
+// Fetch Binance 24hr ticker for BTC + ETH (no key, great CORS)
+async function fetchBinance() {
+  try {
+    const res = await fetch(
+      "https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22%5D",
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) return {};
+    const data = await res.json();
+    const out = {};
+    data.forEach(d => {
+      const price = parseFloat(d.lastPrice);
+      const dp = parseFloat(d.priceChangePercent);
+      if (d.symbol === "BTCUSDT") out["BTC/USD"] = { val: fmtPrice("BTC/USD", price), chg: fmtPct(dp), dp };
+      if (d.symbol === "ETHUSDT") out["ETH/USD"] = { val: fmtPrice("ETH/USD", price), chg: fmtPct(dp), dp };
+    });
+    return out;
+  } catch(e) { return {}; }
+}
+
+// Fetch one Finnhub quote
+async function fetchFinnhubQuote(sym, fhSym, apiKey) {
+  try {
+    const res = await fetch(
+      `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(fhSym)}&token=${apiKey}`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) return null;
+    const d = await res.json();
+    if (!d.c || d.c === 0) return null;
+    return { val: fmtPrice(sym, d.c), chg: fmtPct(d.dp), dp: d.dp };
+  } catch(e) { return null; }
+}
+
+// Fetch all Finnhub stocks/forex/gold sequentially (stay under 60 req/min)
+async function fetchFinnhub(apiKey) {
+  const out = {};
+  const entries = Object.entries(FH_MAP);
+  for (let i = 0; i < entries.length; i++) {
+    const [sym, fhSym] = entries[i];
+    const result = await fetchFinnhubQuote(sym, fhSym, apiKey);
+    if (result) out[sym] = result;
+    if (i < entries.length - 1) await new Promise(r => setTimeout(r, 150)); // small delay between calls
+  }
+  return out;
+}
+
+function TickerTape() {
+  const [tickers, setTickers] = useState(seedTickers);
+  const [apiKey, setApiKey] = useState(VITE_FINNHUB_KEY || "");
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [status, setStatus] = useState("seed"); // "seed" | "partial" | "live" | "error"
+  const [lastTime, setLastTime] = useState(null);
+
+  const loadAll = async (key) => {
+    const effectiveKey = key || apiKey;
+
+    // Always fetch crypto (free)
+    const crypto = await fetchBinance();
+
+    // Fetch stocks/forex/gold if we have a Finnhub key
+    let stocks = {};
+    if (effectiveKey) {
+      stocks = await fetchFinnhub(effectiveKey);
+    }
+
+    const all = { ...crypto, ...stocks };
+    const liveCount = Object.keys(all).length;
+
+    if (liveCount === 0) {
+      setStatus("seed");
+      // animate seed prices slightly
+      setTickers(seedTickers());
+      return;
+    }
+
+    setTickers(prev => prev.map(t => all[t.sym] ? { ...t, ...all[t.sym] } : t));
+    setLastTime(new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"}));
+
+    if (liveCount >= 8) setStatus("live");
+    else if (effectiveKey) setStatus("partial");
+    else setStatus("partial"); // crypto only
+  };
+
+  useEffect(() => {
+    loadAll(apiKey);
+    const iv = setInterval(() => loadAll(apiKey), 15000);
+    return () => clearInterval(iv);
+  }, [apiKey]);
+
+  const saveKey = () => {
+    setApiKey(keyDraft.trim());
+    setShowKeyInput(false);
+    loadAll(keyDraft.trim());
+  };
+
+  const statusColor = status === "live" ? G.green : status === "partial" ? G.gold : G.faint;
+  const statusLabel = status === "live" ? "● LIVE" : status === "partial" ? "◑ PARTIAL" : "◌ EST";
+
+  const items = [...tickers, ...tickers];
+
+  return (
+    <div style={{position:"relative"}}>
+      <div style={{background:"#030d1e",borderBottom:`1px solid ${G.gold}33`,overflow:"hidden",height:34,display:"flex",alignItems:"center"}}>
+        <div style={{display:"flex",gap:48,animation:"ticker 40s linear infinite",whiteSpace:"nowrap",paddingRight:120}}>
+          {items.map((t,i) => (
+            <span key={i} style={{fontFamily:G.mono,fontSize:12}}>
+              <span style={{color:G.gold,fontWeight:700}}>{t.sym}</span>
+              <span style={{color:G.text,margin:"0 6px"}}>{t.val}</span>
+              <span style={{color: t.dp >= 0 ? G.green : G.red}}>{t.chg}</span>
+            </span>
+          ))}
+        </div>
+        {/* Status + key button */}
+        <div style={{position:"absolute",right:0,top:0,height:34,display:"flex",alignItems:"center",background:"linear-gradient(90deg,transparent,#030d1e 18px)",paddingLeft:24,paddingRight:8,gap:8,zIndex:10}}>
+          {lastTime && <span style={{fontFamily:G.mono,fontSize:8,color:G.faint}}>{lastTime}</span>}
+          <span style={{fontFamily:G.mono,fontSize:8,color:statusColor}}>{statusLabel}</span>
+          <button onClick={()=>{setKeyDraft(apiKey);setShowKeyInput(v=>!v);}}
+            title="Set Finnhub API Key"
+            style={{background:apiKey?"#0a2a10":"#1a0a0a",border:`1px solid ${apiKey?G.green+"44":G.red+"44"}`,borderRadius:4,color:apiKey?G.green:G.red,fontFamily:G.mono,fontSize:8,padding:"2px 6px",cursor:"pointer",letterSpacing:"0.05em"}}>
+            {apiKey ? "🔑 KEY SET" : "🔑 ADD KEY"}
+          </button>
+        </div>
+      </div>
+
+      {/* API Key input dropdown */}
+      {showKeyInput && (
+        <div style={{position:"absolute",top:34,right:0,zIndex:200,background:"#071630",border:`1px solid ${G.borderMid}`,borderRadius:"0 0 8px 8px",padding:"14px 16px",minWidth:340,boxShadow:"0 8px 24px #000a"}}>
+          <div style={{fontFamily:G.mono,fontSize:9,color:G.gold,letterSpacing:"0.15em",marginBottom:6}}>FINNHUB API KEY</div>
+          <div style={{fontFamily:G.mono,fontSize:10,color:G.muted,marginBottom:10,lineHeight:1.7}}>
+            Get a free key at <span style={{color:G.goldLight}}>finnhub.io</span> → sign up → API Keys tab.<br/>
+            Enables real-time prices for stocks, gold & forex.
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <input
+              value={keyDraft}
+              onChange={e=>setKeyDraft(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&saveKey()}
+              placeholder="Enter your Finnhub API key..."
+              style={{flex:1,background:"#030d1e",border:`1px solid ${G.borderMid}`,borderRadius:5,padding:"8px 10px",color:G.text,fontFamily:G.mono,fontSize:11,outline:"none"}}
+            />
+            <button onClick={saveKey}
+              style={{background:`linear-gradient(135deg,${G.gold},${G.goldLight})`,border:"none",borderRadius:5,color:G.bg,fontFamily:G.mono,fontSize:10,fontWeight:700,padding:"8px 14px",cursor:"pointer"}}>
+              SAVE
+            </button>
+          </div>
+          <div style={{fontFamily:G.mono,fontSize:9,color:G.faint,marginTop:8}}>
+            For deployed site: add VITE_FINNHUB_API_KEY to GitHub Secrets
+          </div>
+        </div>
+      )}
     </div>
-  </div>;
+  );
 }
 
 function DisclaimerBar(){
@@ -171,7 +372,7 @@ function LoginPage({setPage,onLogin}){
     setErr("");setLoading(true);
     if(!email||!pass){setErr("Please fill in all fields.");setLoading(false);return;}
     const users=await getUsers(); const user=users[email.toLowerCase()];
-    if(!user){setErr("No account found with that email.");setLoading(false);return;}
+    if(!user){setErr("No account found. Please sign up first, or use admin@elitetrades.com / EliteTrades1!");setLoading(false);return;}
     if(user.password!==btoa(pass)){setErr("Incorrect password.");setLoading(false);return;}
     const s={name:user.name,email:user.email,isAdmin:!!user.isAdmin};
     await saveSession(s);onLogin(s);setLoading(false);
@@ -182,6 +383,12 @@ function LoginPage({setPage,onLogin}){
     {err&&<div style={{background:G.redDim,border:`1px solid ${G.redBorder}`,borderRadius:6,padding:"10px 14px",marginBottom:14,fontFamily:G.mono,fontSize:11,color:G.red}}>⚠ {err}</div>}
     <Btn onClick={handle} disabled={loading} variant="primary" size="lg" style={{width:"100%"}}>{loading?"SIGNING IN...":"SIGN IN →"}</Btn>
     <div style={{textAlign:"center",marginTop:16,fontFamily:G.mono,fontSize:11,color:G.muted}}>No account? <span onClick={()=>setPage("signup")} style={{color:G.gold,cursor:"pointer",textDecoration:"underline"}}>Create one</span></div>
+    <div style={{marginTop:18,padding:"12px 14px",background:G.gold+"08",border:`1px solid ${G.gold}22`,borderRadius:8,textAlign:"center"}}>
+      <div style={{fontFamily:G.mono,fontSize:9,color:G.gold+"88",letterSpacing:"0.15em",marginBottom:6}}>DEFAULT ADMIN CREDENTIALS</div>
+      <div style={{fontFamily:G.mono,fontSize:11,color:G.muted}}>Email: <span style={{color:G.goldLight}}>admin@elitetrades.com</span></div>
+      <div style={{fontFamily:G.mono,fontSize:11,color:G.muted,marginTop:3}}>Password: <span style={{color:G.goldLight}}>EliteTrades1!</span></div>
+      <div style={{fontFamily:G.mono,fontSize:9,color:G.faint,marginTop:8}}>Change after first login by creating a new account</div>
+    </div>
   </AuthShell>;
 }
 
@@ -329,12 +536,25 @@ Risk: ${risk}
 Return ONLY valid JSON (no markdown):
 {"asset":"NAME","assetType":"Type","overallBias":"Bullish/Bearish/Neutral","biasStrength":"Strong/Moderate/Weak","summary":"2-3 sentences","technicalAnalysis":{"trend":"desc","keyLevels":["l1","l2","l3"],"indicators":["i1","i2","i3"]},"strategySetup":{"setupType":"name","entryZoneConcept":"desc","stopLossConcept":"desc","takeProfitConcept":"desc","rrRatioConcept":"1:2"},"riskManagement":["r1","r2","r3"],"catalysts":["bull","bear","macro"],"educationalNote":"lesson"}`;
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "anthropic-dangerous-direct-browser-access":"true"
+        },
+        body:JSON.stringify({
+          model:"claude-sonnet-4-6",
+          max_tokens:1024,
+          messages:[{role:"user",content:prompt}]
+        })
+      });
       const data=await res.json();
-      const text=data.content?.map(b=>b.text||"").join("")||"";
-      setResult(JSON.parse(text.replace(/```json|```/g,"").trim()));
-      setTimeout(()=>resultRef.current?.scrollIntoView({behavior:"smooth"}),100);
-    }catch{setErr("Analysis failed. Please check the asset name and try again.");}
+      if(data.error){throw new Error(data.error.message);}
+      const text=(data.content||[]).map(function(b){return b.text||"";}).join("");
+      const cleaned=text.replace(/```json/g,"").replace(/```/g,"").trim();
+      setResult(JSON.parse(cleaned));
+      setTimeout(function(){if(resultRef.current)resultRef.current.scrollIntoView({behavior:"smooth"});},100);
+    }catch(e){setErr("Analysis failed: "+(e.message||"Unknown error"));}
     setLoading(false);
   };
 
