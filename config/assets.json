@@ -1,0 +1,22 @@
+{
+  "_note": "Managed via the Elite Trades Admin Dashboard. Export & commit this file to sync with the X auto-post bot.",
+  "lastUpdated": null,
+  "updatedBy": null,
+  "daily": [
+    { "symbol": "BTC/USD", "name": "Bitcoin",      "type": "Crypto"    },
+    { "symbol": "ETH/USD", "name": "Ethereum",     "type": "Crypto"    },
+    { "symbol": "SPY",     "name": "S&P 500 ETF",  "type": "ETF"       },
+    { "symbol": "QQQ",     "name": "Nasdaq ETF",   "type": "ETF"       },
+    { "symbol": "AAPL",    "name": "Apple",         "type": "Stock"     },
+    { "symbol": "NVDA",    "name": "NVIDIA",        "type": "Stock"     },
+    { "symbol": "GOLD",    "name": "Gold",          "type": "Commodity" },
+    { "symbol": "EUR/USD", "name": "Euro/Dollar",   "type": "Forex"     }
+  ],
+  "weekly": [
+    { "symbol": "BTC/USD", "name": "Bitcoin",      "type": "Crypto"    },
+    { "symbol": "ETH/USD", "name": "Ethereum",     "type": "Crypto"    },
+    { "symbol": "SPY",     "name": "S&P 500 ETF",  "type": "ETF"       },
+    { "symbol": "GOLD",    "name": "Gold",          "type": "Commodity" },
+    { "symbol": "EUR/USD", "name": "Euro/Dollar",   "type": "Forex"     }
+  ]
+}

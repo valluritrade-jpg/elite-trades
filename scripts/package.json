@@ -1,0 +1,15 @@
+{
+  "name": "elite-trades-bot",
+  "version": "1.0.0",
+  "description": "Elite Trades LLC — Automated X post engine",
+  "main": "auto-post.js",
+  "type": "module",
+  "scripts": {
+    "start":  "node auto-post.js",
+    "daily":  "POST_TYPE=daily node auto-post.js",
+    "weekly": "POST_TYPE=weekly node auto-post.js"
+  },
+  "dependencies": {
+    "twitter-api-v2": "^1.17.0"
+  }
+}

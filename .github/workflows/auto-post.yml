@@ -1,0 +1,60 @@
+name: Elite Trades — Auto Post to X
+
+on:
+  schedule:
+    # Daily post: Mon–Fri at 9:00 AM EST (14:00 UTC)
+    - cron: "0 14 * * 1-5"
+    # Weekly thread: Every Monday at 8:00 AM EST (13:00 UTC)
+    - cron: "0 13 * * 1"
+  # Manual trigger from GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      post_type:
+        description: "Post type"
+        required: true
+        default: "daily"
+        type: choice
+        options:
+          - daily
+          - weekly
+
+jobs:
+  post-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: scripts/package.json
+
+      - name: Install bot dependencies
+        run: npm install
+        working-directory: scripts
+
+      - name: Determine post type
+        id: post_type
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "type=${{ github.event.inputs.post_type }}" >> $GITHUB_OUTPUT
+          elif [ "$(date -u +%H)" = "13" ]; then
+            echo "type=weekly" >> $GITHUB_OUTPUT
+          else
+            echo "type=daily" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run auto-post bot
+        env:
+          ANTHROPIC_API_KEY:       ${{ secrets.ANTHROPIC_API_KEY }}
+          X_API_KEY:               ${{ secrets.X_API_KEY }}
+          X_API_SECRET:            ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN:          ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET:   ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          POST_TYPE:               ${{ steps.post_type.outputs.type }}
+        run: node auto-post.js
+        working-directory: scripts
