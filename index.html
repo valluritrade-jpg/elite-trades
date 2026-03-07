@@ -2,27 +2,33 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Elite Trades LLC — AI-powered market intelligence and trading education platform." />
     <meta name="theme-color" content="#020a18" />
-
-    <!-- Open Graph (for link previews) -->
     <meta property="og:title" content="Elite Trades LLC" />
     <meta property="og:description" content="AI-powered market intelligence & trading education." />
     <meta property="og:type" content="website" />
-
     <title>Elite Trades LLC | AI Market Intelligence</title>
-
     <style>
-      /* Prevent flash of unstyled content */
-      html, body, #root {
-        margin: 0;
-        padding: 0;
-        background: #020a18;
-        min-height: 100vh;
-      }
+      html, body, #root { margin: 0; padding: 0; background: #020a18; min-height: 100vh; }
     </style>
+    <!-- GitHub Pages SPA: restore path encoded by 404.html -->
+    <script>
+      (function() {
+        var search = window.location.search;
+        if (search.indexOf('?p=') === 0) {
+          var path = search.slice(3).replace(/~and~/g, '&');
+          var qi = path.indexOf('&q=');
+          var query = qi !== -1 ? path.slice(qi + 3) : '';
+          path = qi !== -1 ? path.slice(0, qi) : path;
+          window.history.replaceState(null, null,
+            window.location.pathname.split('/').slice(0, 2).join('/') + '/' + path +
+            (query ? '?' + query : '') + window.location.hash
+          );
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
