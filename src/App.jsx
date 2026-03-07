@@ -113,6 +113,10 @@ function TypeBadge({type}){const colors={Crypto:"#60a5fa",Stock:"#4ade80",ETF:"#
 const VITE_FINNHUB_KEY = (typeof import.meta !== "undefined" && import.meta.env?.VITE_FINNHUB_API_KEY)
   ? import.meta.env.VITE_FINNHUB_API_KEY : null;
 
+// Anthropic API key — baked in at build time via VITE_ANTHROPIC_API_KEY secret
+const VITE_ANTHROPIC_KEY = (typeof import.meta !== "undefined" && import.meta.env?.VITE_ANTHROPIC_API_KEY)
+  ? import.meta.env.VITE_ANTHROPIC_API_KEY : null;
+
 // Seed prices shown instantly before live data loads
 const SEED = {
   "BTC/USD": { price: 97500,  prev: 96200,  dp: +1.35 },
@@ -536,13 +540,17 @@ Risk: ${risk}
 Return ONLY valid JSON (no markdown):
 {"asset":"NAME","assetType":"Type","overallBias":"Bullish/Bearish/Neutral","biasStrength":"Strong/Moderate/Weak","summary":"2-3 sentences","technicalAnalysis":{"trend":"desc","keyLevels":["l1","l2","l3"],"indicators":["i1","i2","i3"]},"strategySetup":{"setupType":"name","entryZoneConcept":"desc","stopLossConcept":"desc","takeProfitConcept":"desc","rrRatioConcept":"1:2"},"riskManagement":["r1","r2","r3"],"catalysts":["bull","bear","macro"],"educationalNote":"lesson"}`;
     try{
+      const reqHeaders = {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      };
+      // On deployed site, key is baked in at build time
+      if (VITE_ANTHROPIC_KEY) reqHeaders["x-api-key"] = VITE_ANTHROPIC_KEY;
+
       const res=await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "anthropic-version":"2023-06-01",
-          "anthropic-dangerous-direct-browser-access":"true"
-        },
+        headers: reqHeaders,
         body:JSON.stringify({
           model:"claude-sonnet-4-5-20251001",
           max_tokens:1024,
