@@ -534,18 +534,19 @@ function AnalyzerPage({user}){
   const analyze=async()=>{
     if(!asset.trim())return;
     setLoading(true);setErr(null);setResult(null);
-    const prompt=`You are an expert trading educator at Elite Trades LLC. A student wants to learn about ${asset.trim().toUpperCase()}.
-Trading Style: ${tf==="scalp"?"Scalping":tf==="swing"?"Swing Trading":"Position/Long-term"}
-Risk: ${risk}
-Return ONLY valid JSON (no markdown):
-{"asset":"NAME","assetType":"Type","overallBias":"Bullish/Bearish/Neutral","biasStrength":"Strong/Moderate/Weak","summary":"2-3 sentences","technicalAnalysis":{"trend":"desc","keyLevels":["l1","l2","l3"],"indicators":["i1","i2","i3"]},"strategySetup":{"setupType":"name","entryZoneConcept":"desc","stopLossConcept":"desc","takeProfitConcept":"desc","rrRatioConcept":"1:2"},"riskManagement":["r1","r2","r3"],"catalysts":["bull","bear","macro"],"educationalNote":"lesson"}`;
+    const style=tf==="scalp"?"Scalping":tf==="swing"?"Swing Trading":"Position/Long-term";
+    const prompt=`You are a trading educator at Elite Trades LLC. Provide an educational strategy for ${asset.trim().toUpperCase()} (${style}, ${risk} risk).
+
+Respond ONLY with a single valid JSON object. No markdown. No explanation. No text before or after. Keep all string values concise (under 80 chars each) to avoid truncation.
+
+{"asset":"","assetType":"","overallBias":"Bullish","biasStrength":"Moderate","summary":"","technicalAnalysis":{"trend":"","keyLevels":["","",""],"indicators":["","",""]},"strategySetup":{"setupType":"","entryZoneConcept":"","stopLossConcept":"","takeProfitConcept":"","rrRatioConcept":""},"riskManagement":["","",""],"catalysts":["","",""],"educationalNote":""}`;
+
     try{
       const reqHeaders = {
         "Content-Type": "application/json",
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true"
       };
-      // On deployed site, key is baked in at build time
       if (VITE_ANTHROPIC_KEY) reqHeaders["x-api-key"] = VITE_ANTHROPIC_KEY;
 
       const res=await fetch("https://api.anthropic.com/v1/messages",{
@@ -553,15 +554,18 @@ Return ONLY valid JSON (no markdown):
         headers: reqHeaders,
         body:JSON.stringify({
           model:"claude-sonnet-4-6",
-          max_tokens:1024,
+          max_tokens:2048,
           messages:[{role:"user",content:prompt}]
         })
       });
       const data=await res.json();
       if(data.error){throw new Error(data.error.message);}
-      const text=(data.content||[]).map(function(b){return b.text||"";}).join("");
-      const cleaned=text.replace(/```json/g,"").replace(/```/g,"").trim();
-      setResult(JSON.parse(cleaned));
+      if(data.stop_reason==="max_tokens"){throw new Error("Response too long — try a shorter asset name.");}
+      const text=(data.content||[]).map(function(b){return b.text||"";}).join("").trim();
+      // Extract JSON even if there's surrounding text
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if(!jsonMatch){throw new Error("No valid JSON in response.");}
+      setResult(JSON.parse(jsonMatch[0]));
       setTimeout(function(){if(resultRef.current)resultRef.current.scrollIntoView({behavior:"smooth"});},100);
     }catch(e){setErr("Analysis failed: "+(e.message||"Unknown error"));}
     setLoading(false);
