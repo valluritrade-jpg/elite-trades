@@ -76,7 +76,9 @@ async function sbSignUp(email, password, name) {
 async function sbSignIn(email, password) {
   if (!supabase) return { error: "Supabase not configured." };
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const timeout = new Promise((_,reject) => setTimeout(()=>reject(new Error("Sign in timed out. Please try again.")), 8000));
+    const result = supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await Promise.race([result, timeout]);
     return { data, error: error?.message };
   } catch(e) { return { error: e.message }; }
 }
@@ -592,9 +594,9 @@ function LoginPage({setPage,onLogin}){
     setErr("");setLoading(true);
     if(!email||!pass){setErr("Please fill in all fields.");setLoading(false);return;}
     const {data,error}=await sbSignIn(email.trim().toLowerCase(),pass);
-    if(error){setErr(error);setLoading(false);return;}
-    // onAuthStateChange in App root handles everything from here
     setLoading(false);
+    if(error){setErr(error);return;}
+    // onAuthStateChange handles navigation
   };
 
   const handleReset=async()=>{
