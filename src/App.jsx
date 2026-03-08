@@ -78,15 +78,23 @@ async function sbSignOut() {
 async function sbGetProfile(userId) {
   if (!supabase) return null;
   try {
-    const timeout = new Promise(resolve => setTimeout(() => resolve(null), 4000));
-    const query = supabase.from("profiles").select("*").eq("id", userId).single()
-      .then(({data}) => data).catch(() => null);
-    return await Promise.race([query, timeout]);
+    // Try up to 3 times with delay
+    for (let i = 0; i < 3; i++) {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .maybeSingle();
+      if (data) return data;
+      if (i < 2) await new Promise(r => setTimeout(r, 800));
+    }
+    return null;
   } catch(e) { return null; }
 }
 
 // Build user object from session + profile (with safe fallback if profile missing)
 function buildUser(sessionUser, profile) {
+  console.log("buildUser — profile:", profile, "session:", sessionUser?.id);
   const role = profile?.role || "free";
   return {
     id: sessionUser.id,
