@@ -333,9 +333,9 @@ function Nav({page,setPage,user,onLogout}){
       </div>
     </div>
     <div style={{display:"flex",alignItems:"center",gap:4}}>
-      {[["HOME","home"],["ANALYZER","analyzer"]].map(([label,id])=>(
+      {[["HOME","home"],["ANALYZER","analyzer"],["STRATEGY","strategy"]].map(([label,id])=>(
         <button key={id} onClick={()=>setPage(id)} style={{background:page===id?G.gold+"18":"transparent",border:page===id?`1px solid ${G.gold}55`:"1px solid transparent",color:page===id?G.goldLight:"#667",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontFamily:G.mono,fontSize:10,letterSpacing:"0.1em"}}>
-          {label}{id==="analyzer"&&!user?" 🔒":""}
+          {label}
         </button>
       ))}
       {user?.isAdmin&&<button onClick={()=>setPage("admin")} style={{background:page==="admin"?"#0a1a40":"transparent",border:page==="admin"?`1px solid #60a5fa55`:"1px solid transparent",color:page==="admin"?"#60a5fa":"#555",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontFamily:G.mono,fontSize:10}}>⚙ ADMIN</button>}
@@ -535,9 +535,10 @@ function AnalyzerPage({user}){
     if(!asset.trim())return;
     setLoading(true);setErr(null);setResult(null);
     const style=tf==="scalp"?"Scalping":tf==="swing"?"Swing Trading":"Position/Long-term";
-    const prompt=`You are a trading educator at Elite Trades LLC. Provide an educational strategy for ${asset.trim().toUpperCase()} (${style}, ${risk} risk).
+    const sym = asset.trim().toUpperCase();
+    const prompt = `You are a professional trading educator at Elite Trades LLC. Analyze ${sym} for educational purposes (${style}, ${risk} risk).
 
-Respond ONLY with a single valid JSON object. No markdown. No explanation. No text before or after. Keep all string values concise (under 80 chars each) to avoid truncation.
+Return ONLY a single valid JSON object — no markdown, no extra text. Keep every string under 90 characters.
 
 {"asset":"","assetType":"","overallBias":"Bullish","biasStrength":"Moderate","summary":"","technicalAnalysis":{"trend":"","keyLevels":["","",""],"indicators":["","",""]},"strategySetup":{"setupType":"","entryZoneConcept":"","stopLossConcept":"","takeProfitConcept":"","rrRatioConcept":""},"riskManagement":["","",""],"catalysts":["","",""],"educationalNote":""}`;
 
@@ -554,18 +555,18 @@ Respond ONLY with a single valid JSON object. No markdown. No explanation. No te
         headers: reqHeaders,
         body:JSON.stringify({
           model:"claude-sonnet-4-6",
-          max_tokens:2048,
+          max_tokens:3000,
           messages:[{role:"user",content:prompt}]
         })
       });
       const data=await res.json();
       if(data.error){throw new Error(data.error.message);}
-      if(data.stop_reason==="max_tokens"){throw new Error("Response too long — try a shorter asset name.");}
+      if(data.stop_reason==="max_tokens"){throw new Error("Response too long — please try again.");}
       const text=(data.content||[]).map(function(b){return b.text||"";}).join("").trim();
-      // Extract JSON even if there's surrounding text
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if(!jsonMatch){throw new Error("No valid JSON in response.");}
-      setResult(JSON.parse(jsonMatch[0]));
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if(start===-1||end===-1){throw new Error("No valid JSON in response.");}
+      setResult(JSON.parse(text.slice(start, end+1)));
       setTimeout(function(){if(resultRef.current)resultRef.current.scrollIntoView({behavior:"smooth"});},100);
     }catch(e){setErr("Analysis failed: "+(e.message||"Unknown error"));}
     setLoading(false);
@@ -577,10 +578,10 @@ Respond ONLY with a single valid JSON object. No markdown. No explanation. No te
     <div style={{background:`linear-gradient(180deg,#030d22,${G.bg})`,borderBottom:`1px solid ${G.border}`,padding:"36px 24px 28px",textAlign:"center"}}>
       <div style={{fontFamily:G.mono,fontSize:9,color:G.gold,letterSpacing:"0.2em",marginBottom:8}}>AI STRATEGY ENGINE</div>
       <h1 style={{fontFamily:G.serif,fontSize:"clamp(18px,4vw,36px)",color:G.goldLight,margin:"0 0 7px"}}>Asset Strategy Analyzer</h1>
-      <p style={{fontFamily:G.mono,fontSize:11,color:G.muted,maxWidth:400,margin:"0 auto"}}>Enter any asset for an AI-generated educational trade strategy</p>
+      <p style={{fontFamily:G.mono,fontSize:11,color:G.muted,maxWidth:440,margin:"0 auto"}}>AI-generated trade strategy + options flow analysis for any asset</p>
       {user&&<div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:10,background:G.gold+"0d",border:`1px solid ${G.gold}33`,borderRadius:100,padding:"3px 10px",fontFamily:G.mono,fontSize:9,color:G.gold+"bb"}}><span style={{color:G.gold}}>◆</span>Logged in as {user.name}</div>}
     </div>
-    <div style={{maxWidth:660,margin:"28px auto",padding:"0 16px"}}>
+    <div style={{maxWidth:720,margin:"28px auto",padding:"0 16px"}}>
       <Card>
         <div style={{marginBottom:14}}><Label>ASSET / TICKER</Label><TextInput placeholder="e.g. AAPL, BTC, EUR/USD, GOLD, SPY..." value={asset} onChange={e=>setAsset(e.target.value)} onKeyDown={e=>e.key==="Enter"&&analyze()}/></div>
         <div style={{display:"flex",gap:14,marginBottom:20,flexWrap:"wrap"}}>
@@ -595,19 +596,31 @@ Respond ONLY with a single valid JSON object. No markdown. No explanation. No te
         </div>
         <Btn onClick={analyze} disabled={loading||!asset.trim()} variant="primary" style={{width:"100%",padding:"13px"}}>{loading?"◆ ANALYZING...":"◆ GENERATE STRATEGY"}</Btn>
       </Card>
+
       {err&&<div style={{marginTop:12,background:G.redDim,border:`1px solid ${G.redBorder}`,borderRadius:8,padding:"11px 14px",fontFamily:G.mono,fontSize:12,color:G.red}}>{err}</div>}
       {loading&&<div style={{textAlign:"center",padding:"40px 0"}}>
         <div style={{display:"inline-block",width:38,height:38,borderRadius:"50%",border:`2px solid ${G.gold}22`,borderTop:`2px solid ${G.gold}`,animation:"spin 1s linear infinite"}}/>
-        <div style={{fontFamily:G.mono,fontSize:11,color:G.muted,marginTop:12}}>Analyzing markets...</div>
+        <div style={{fontFamily:G.mono,fontSize:11,color:G.muted,marginTop:12}}>Analyzing price action & options flow...</div>
       </div>}
+
       {result&&<div ref={resultRef} style={{marginTop:22}}>
+        {/* Header */}
         <Card style={{marginBottom:14}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
-            <div><div style={{fontFamily:G.mono,fontSize:9,color:G.muted,marginBottom:3}}>{result.assetType}</div><div style={{fontFamily:G.serif,fontSize:30,color:G.goldLight,fontWeight:700}}>{result.asset}</div></div>
-            <div style={{textAlign:"right"}}><div style={{fontFamily:G.mono,fontSize:9,color:G.muted,marginBottom:2}}>OVERALL BIAS</div><div style={{fontFamily:G.serif,fontSize:18,fontWeight:700,color:bc(result.overallBias)}}>{result.overallBias}</div><div style={{fontFamily:G.mono,fontSize:9,color:G.muted}}>{result.biasStrength}</div></div>
+            <div>
+              <div style={{fontFamily:G.mono,fontSize:9,color:G.muted,marginBottom:3}}>{result.assetType}</div>
+              <div style={{fontFamily:G.serif,fontSize:30,color:G.goldLight,fontWeight:700}}>{result.asset}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontFamily:G.mono,fontSize:9,color:G.muted,marginBottom:2}}>OVERALL BIAS</div>
+              <div style={{fontFamily:G.serif,fontSize:18,fontWeight:700,color:bc(result.overallBias)}}>{result.overallBias}</div>
+              <div style={{fontFamily:G.mono,fontSize:9,color:G.muted}}>{result.biasStrength}</div>
+            </div>
           </div>
           <p style={{fontFamily:G.mono,fontSize:12,color:G.muted,lineHeight:1.9,marginTop:14,marginBottom:0}}>{result.summary}</p>
         </Card>
+
+        {/* Technical + Strategy */}
         {[
           {title:"📈 Technical Analysis",body:<>
             <div style={{fontFamily:G.mono,fontSize:9,color:G.gold+"88",letterSpacing:"0.1em",marginBottom:3}}>TREND</div>
@@ -619,7 +632,10 @@ Respond ONLY with a single valid JSON object. No markdown. No explanation. No te
           </>},
           {title:"⚙️ Strategy Setup",body:<>
             {[["SETUP TYPE",result.strategySetup?.setupType,true],["ENTRY ZONE",result.strategySetup?.entryZoneConcept],["STOP-LOSS",result.strategySetup?.stopLossConcept],["TAKE-PROFIT",result.strategySetup?.takeProfitConcept],["R/R RATIO",result.strategySetup?.rrRatioConcept]].map(([l,v,hl])=>(
-              <div key={l} style={{marginBottom:10}}><div style={{fontFamily:G.mono,fontSize:9,color:G.gold+"88",letterSpacing:"0.1em",marginBottom:2}}>{l}</div><div style={{fontFamily:G.mono,fontSize:12,color:hl?G.goldLight:G.muted,lineHeight:1.7}}>{v}</div></div>
+              <div key={l} style={{marginBottom:10}}>
+                <div style={{fontFamily:G.mono,fontSize:9,color:G.gold+"88",letterSpacing:"0.1em",marginBottom:2}}>{l}</div>
+                <div style={{fontFamily:G.mono,fontSize:12,color:hl?G.goldLight:G.muted,lineHeight:1.7}}>{v}</div>
+              </div>
             ))}
           </>},
           {title:"🛡️ Risk Management",body:result.riskManagement?.map((r,i)=><div key={i} style={{display:"flex",gap:7,marginBottom:7}}><span style={{color:G.red,fontSize:9}}>◆</span><span style={{fontFamily:G.mono,fontSize:11,color:G.muted,lineHeight:1.7}}>{r}</span></div>)},
@@ -629,18 +645,402 @@ Respond ONLY with a single valid JSON object. No markdown. No explanation. No te
             <div style={{fontFamily:G.serif,fontSize:14,color:G.goldLight,marginBottom:12}}>{title}</div>{body}
           </Card>
         ))}
+
+        {/* Educational + Disclaimer */}
         <div style={{background:"#020d20",border:`1px solid ${G.greenBorder}`,borderRadius:10,padding:"18px 22px",marginBottom:12}}>
           <div style={{fontFamily:G.mono,fontSize:9,color:G.green,letterSpacing:"0.15em",marginBottom:6}}>📚 EDUCATIONAL INSIGHT</div>
           <p style={{fontFamily:G.mono,fontSize:11,color:G.muted,lineHeight:1.9,margin:0}}>{result.educationalNote}</p>
         </div>
         <div style={{background:"#010d20",border:`1px solid ${G.gold}44`,borderRadius:10,padding:"16px 20px"}}>
           <div style={{fontFamily:G.mono,fontSize:9,color:G.gold,letterSpacing:"0.15em",marginBottom:5}}>⚠️ DISCLAIMER</div>
-          <p style={{fontFamily:G.mono,fontSize:11,color:G.gold+"88",lineHeight:1.9,margin:0}}>For <strong>educational purposes only</strong>. Not financial advice. Always consult a licensed advisor before making investment decisions.</p>
+          <p style={{fontFamily:G.mono,fontSize:11,color:G.gold+"88",lineHeight:1.9,margin:0}}>For <strong>educational purposes only</strong>. Not financial advice. Options trading involves significant risk. Always consult a licensed advisor before making investment decisions.</p>
         </div>
       </div>}
     </div>
     <div style={{height:40}}/>
   </div>;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OPTIONS STRATEGY BUILDER PAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function StratLegRow({leg, i}) {
+  const isBuy = leg.action && leg.action.toLowerCase() === "buy";
+  return (
+    <tr style={{borderBottom:`1px solid ${G.border}`}}>
+      <td style={{padding:"10px 12px",fontFamily:G.mono,fontSize:11,color:isBuy?G.green:G.red,fontWeight:700}}>{leg.action}</td>
+      <td style={{padding:"10px 12px",fontFamily:G.mono,fontSize:11,color:G.text}}>{leg.type}</td>
+      <td style={{padding:"10px 12px",fontFamily:G.mono,fontSize:11,color:G.goldLight,fontWeight:700}}>{leg.strike}</td>
+      <td style={{padding:"10px 12px",fontFamily:G.mono,fontSize:11,color:G.muted}}>{leg.expiry}</td>
+      <td style={{padding:"10px 12px",fontFamily:G.mono,fontSize:11,color:isBuy?G.red:G.green}}>{isBuy?"-":"+"}${leg.premium}</td>
+    </tr>
+  );
+}
+
+function ScenarioRow({s, i}) {
+  const isPos = s.pnl && s.pnl.includes("+");
+  const isNeg = s.pnl && s.pnl.includes("-");
+  const rowBg = i%2===0?G.bg3:G.bg2;
+  return (
+    <tr style={{background:rowBg}}>
+      <td style={{padding:"10px 12px",fontFamily:G.mono,fontSize:11,color:G.muted}}>{s.scenario}</td>
+      <td style={{padding:"10px 12px",fontFamily:G.mono,fontSize:11,color:G.goldLight}}>{s.price}</td>
+      <td style={{padding:"10px 12px",fontFamily:G.mono,fontSize:11,color:isPos?G.green:isNeg?G.red:G.muted,fontWeight:700}}>{s.pnl}</td>
+      <td style={{padding:"10px 12px",fontFamily:G.mono,fontSize:11,color:G.blue}}>{s.probability}</td>
+    </tr>
+  );
+}
+
+function StrategyCard({strat, idx}) {
+  const [open, setOpen] = useState(idx === 0);
+  const isBull = strat.direction && (strat.direction.toLowerCase().includes("bull") || strat.direction.toLowerCase().includes("call"));
+  const isBear = strat.direction && (strat.direction.toLowerCase().includes("bear") || strat.direction.toLowerCase().includes("put"));
+  const dirColor = isBull ? G.green : isBear ? G.red : G.gold;
+  const termColor = strat.term === "Short-Term" ? G.blue : G.gold;
+  const confColor = strat.confidence === "High" ? G.green : strat.confidence === "Medium" ? G.gold : G.muted;
+
+  return (
+    <div style={{border:`1px solid ${dirColor}33`,borderRadius:12,marginBottom:16,overflow:"hidden",background:G.bg3}}>
+      {/* Header row — always visible */}
+      <div onClick={()=>setOpen(v=>!v)} style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",cursor:"pointer",background:`linear-gradient(135deg,${G.bg4},${G.bg3})`,flexWrap:"wrap"}}>
+        <div style={{width:30,height:30,borderRadius:"50%",background:dirColor+"22",border:`1px solid ${dirColor}55`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:G.serif,fontSize:13,color:dirColor,fontWeight:700,flexShrink:0}}>{idx+1}</div>
+        <div style={{flex:1,minWidth:160}}>
+          <div style={{fontFamily:G.serif,fontSize:15,color:G.goldLight,fontWeight:700}}>{strat.name}</div>
+          <div style={{fontFamily:G.mono,fontSize:10,color:G.muted,marginTop:2}}>{strat.rationale}</div>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{background:dirColor+"18",border:`1px solid ${dirColor}44`,borderRadius:100,padding:"3px 10px",fontFamily:G.mono,fontSize:9,color:dirColor}}>{strat.direction}</span>
+          <span style={{background:termColor+"18",border:`1px solid ${termColor}44`,borderRadius:100,padding:"3px 10px",fontFamily:G.mono,fontSize:9,color:termColor}}>{strat.term} · {strat.timeframe}</span>
+          <span style={{background:confColor+"18",border:`1px solid ${confColor}44`,borderRadius:100,padding:"3px 10px",fontFamily:G.mono,fontSize:9,color:confColor}}>Confidence: {strat.confidence}</span>
+        </div>
+        <div style={{fontFamily:G.mono,fontSize:14,color:G.muted,marginLeft:4}}>{open?"▲":"▼"}</div>
+      </div>
+
+      {open && <div style={{padding:"0 20px 20px"}}>
+
+        {/* Key metrics strip */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,margin:"16px 0"}}>
+          {[
+            ["NET DEBIT / CREDIT", strat.netDebit, G.gold],
+            ["MAX PROFIT", strat.maxProfit, G.green],
+            ["MAX LOSS", strat.maxLoss, G.red],
+            ["BREAKEVEN", strat.breakeven, G.blue],
+          ].map(([l,v,c])=>(
+            <div key={l} style={{background:G.bg2,borderRadius:8,padding:"12px 14px",border:`1px solid ${c}22`}}>
+              <div style={{fontFamily:G.mono,fontSize:8,color:G.muted,letterSpacing:"0.12em",marginBottom:5}}>{l}</div>
+              <div style={{fontFamily:G.mono,fontSize:13,color:c,fontWeight:700}}>{v||"--"}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Option legs table */}
+        {strat.legs && strat.legs.length > 0 && (
+          <div style={{marginBottom:18}}>
+            <div style={{fontFamily:G.mono,fontSize:9,color:G.gold+"88",letterSpacing:"0.15em",marginBottom:8}}>OPTION LEGS</div>
+            <div style={{overflowX:"auto",borderRadius:8,border:`1px solid ${G.border}`}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead>
+                  <tr style={{background:G.bg4}}>
+                    {["Action","Type","Strike","Expiry","Premium"].map(h=>(
+                      <th key={h} style={{padding:"9px 12px",fontFamily:G.mono,fontSize:9,color:G.muted,letterSpacing:"0.1em",textAlign:"left",fontWeight:400,borderBottom:`1px solid ${G.border}`}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {strat.legs.map((leg,i)=><StratLegRow key={i} leg={leg} i={i}/>)}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* P&L scenarios table */}
+        {strat.profitScenarios && strat.profitScenarios.length > 0 && (
+          <div style={{marginBottom:18}}>
+            <div style={{fontFamily:G.mono,fontSize:9,color:G.gold+"88",letterSpacing:"0.15em",marginBottom:8}}>P&L SCENARIOS</div>
+            <div style={{overflowX:"auto",borderRadius:8,border:`1px solid ${G.border}`,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead>
+                  <tr style={{background:G.bg4}}>
+                    {["Scenario","Price at Expiry","P&L","Probability"].map(h=>(
+                      <th key={h} style={{padding:"9px 12px",fontFamily:G.mono,fontSize:9,color:G.muted,letterSpacing:"0.1em",textAlign:"left",fontWeight:400,borderBottom:`1px solid ${G.border}`}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {strat.profitScenarios.map((s,i)=><ScenarioRow key={i} s={s} i={i}/>)}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Options Flow + Dark Pool signals */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
+          {[
+            {label:"OPTIONS FLOW SIGNALS", signals:strat.flowSignals, color:G.blue},
+            {label:"DARK POOL SIGNALS", signals:strat.darkPoolSignals, color:"#a78bfa"},
+          ].map(({label,signals,color})=>(
+            <div key={label} style={{background:G.bg2,borderRadius:8,padding:"14px 16px",border:`1px solid ${color}22`}}>
+              <div style={{fontFamily:G.mono,fontSize:8,color:color,letterSpacing:"0.15em",marginBottom:8}}>{label}</div>
+              {(signals||[]).map((s,i)=>(
+                <div key={i} style={{display:"flex",gap:7,marginBottom:6}}>
+                  <span style={{color,fontSize:9,marginTop:1,flexShrink:0}}>◆</span>
+                  <span style={{fontFamily:G.mono,fontSize:10,color:G.muted,lineHeight:1.6}}>{s}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {/* Risk Management table */}
+        {strat.riskManagement && (
+          <div style={{marginBottom:8}}>
+            <div style={{fontFamily:G.mono,fontSize:9,color:G.gold+"88",letterSpacing:"0.15em",marginBottom:8}}>RISK MANAGEMENT</div>
+            <div style={{borderRadius:8,border:`1px solid ${G.redBorder}`,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <tbody>
+                  {[
+                    ["Entry Condition", strat.riskManagement.entryCondition],
+                    ["Profit Exit", strat.riskManagement.exitWin],
+                    ["Stop Loss Exit", strat.riskManagement.exitLoss],
+                    ["Position Size", strat.riskManagement.positionSize],
+                    ["Max Portfolio Allocation", strat.riskManagement.maxAllocation],
+                  ].map(([l,v],i)=>(
+                    <tr key={l} style={{background:i%2===0?G.bg3:G.bg2,borderBottom:`1px solid ${G.border}`}}>
+                      <td style={{padding:"10px 14px",fontFamily:G.mono,fontSize:9,color:G.muted,letterSpacing:"0.08em",width:"38%",whiteSpace:"nowrap"}}>{l}</td>
+                      <td style={{padding:"10px 14px",fontFamily:G.mono,fontSize:11,color:G.text,lineHeight:1.6}}>{v||"--"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>}
+    </div>
+  );
+}
+
+function StrategyPage({user, setPage}) {
+  const [asset, setAsset] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+  const [result, setResult] = useState(null);
+  const resultRef = useRef(null);
+
+  const build = async () => {
+    if (!asset.trim()) return;
+    setLoading(true); setErr(null); setResult(null);
+    const sym = asset.trim().toUpperCase();
+    const isCrypto = ["BTC","ETH","SOL","BNB","XRP","DOGE","ADA"].some(c=>sym.includes(c));
+    const assetNote = isCrypto
+      ? "This is a crypto asset — use perpetual futures/options language (calls/puts via Deribit or CME). Use realistic crypto strike increments."
+      : "This is an equity/ETF — use standard equity options (100 shares per contract). Use realistic strike increments for the asset price range.";
+
+    const prompt = `You are a professional options trading educator at Elite Trades LLC. A student wants to learn about options strategies for ${sym}.
+
+${assetNote}
+
+Analyze the current price action, typical options flow patterns, and dark pool signals for ${sym}. Then produce 3 distinct educational options strategies: one short-term (1-2 weeks), one medium-term (30-45 days), and one long-term (60-90 days).
+
+Return ONLY a single valid JSON object — no markdown, no preamble. Keep strings under 100 chars. Use realistic, educational approximate values.
+
+{
+  "asset": "${sym}",
+  "assetType": "",
+  "currentPrice": "",
+  "priceAction": "",
+  "optionsFlowSummary": "",
+  "darkPoolSummary": "",
+  "marketBias": "Bullish",
+  "ivEnvironment": "",
+  "strategies": [
+    {
+      "name": "",
+      "term": "Short-Term",
+      "timeframe": "7-14 days",
+      "direction": "Bullish",
+      "confidence": "High",
+      "rationale": "",
+      "legs": [
+        {"action":"Buy","type":"Call","strike":"","expiry":"","premium":""},
+        {"action":"Sell","type":"Call","strike":"","expiry":"","premium":""}
+      ],
+      "netDebit": "",
+      "maxProfit": "",
+      "maxLoss": "",
+      "breakeven": "",
+      "profitScenarios": [
+        {"scenario":"Bull Case","price":"","pnl":"","probability":""},
+        {"scenario":"Base Case","price":"","pnl":"","probability":""},
+        {"scenario":"Bear Case","price":"","pnl":"","probability":""}
+      ],
+      "flowSignals": ["",""],
+      "darkPoolSignals": ["",""],
+      "riskManagement": {
+        "entryCondition": "",
+        "exitWin": "",
+        "exitLoss": "",
+        "positionSize": "",
+        "maxAllocation": ""
+      }
+    }
+  ],
+  "educationalNote": ""
+}`;
+
+    try {
+      const reqHeaders = {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      };
+      if (VITE_ANTHROPIC_KEY) reqHeaders["x-api-key"] = VITE_ANTHROPIC_KEY;
+
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: reqHeaders,
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 4000,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      if (data.stop_reason === "max_tokens") throw new Error("Response truncated — please try again.");
+      const text = (data.content||[]).map(b=>b.text||"").join("").trim();
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if (start === -1 || end === -1) throw new Error("No valid JSON returned.");
+      setResult(JSON.parse(text.slice(start, end+1)));
+      setTimeout(()=>{ if(resultRef.current) resultRef.current.scrollIntoView({behavior:"smooth"}); }, 120);
+    } catch(e) { setErr("Analysis failed: " + (e.message || "Unknown error")); }
+    setLoading(false);
+  };
+
+  const biasColor = r => !r ? G.gold : r.toLowerCase().includes("bull") ? G.green : r.toLowerCase().includes("bear") ? G.red : G.gold;
+
+  return (
+    <div style={{color:G.text, minHeight:"90vh", background:G.bg}}>
+      {/* Hero */}
+      <div style={{background:`linear-gradient(180deg,#030d22,${G.bg})`,borderBottom:`1px solid #a78bfa33`,padding:"36px 24px 28px",textAlign:"center"}}>
+        <div style={{fontFamily:G.mono,fontSize:9,color:"#a78bfa",letterSpacing:"0.2em",marginBottom:8}}>AI-POWERED · OPTIONS FLOW · DARK POOL</div>
+        <h1 style={{fontFamily:G.serif,fontSize:"clamp(20px,4vw,40px)",color:G.goldLight,margin:"0 0 8px"}}>Options Strategy Builder</h1>
+        <p style={{fontFamily:G.mono,fontSize:11,color:G.muted,maxWidth:500,margin:"0 auto 12px"}}>
+          Enter any ticker to receive AI-generated options strategies ranked by price action, options flow, and dark pool data
+        </p>
+        {!user && (
+          <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"#a78bfa18",border:"1px solid #a78bfa44",borderRadius:100,padding:"5px 14px",fontFamily:G.mono,fontSize:10,color:"#a78bfa",cursor:"pointer"}} onClick={()=>setPage("signup")}>
+            🔒 Create a free account for unlimited access
+          </div>
+        )}
+      </div>
+
+      <div style={{maxWidth:860,margin:"28px auto",padding:"0 16px"}}>
+        {/* Input card */}
+        <Card style={{marginBottom:20}}>
+          <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+            <div style={{flex:1,minWidth:200}}>
+              <Label>ASSET TICKER</Label>
+              <TextInput
+                placeholder="e.g. AAPL, SPY, TSLA, BTC, QQQ..."
+                value={asset}
+                onChange={e=>setAsset(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&build()}
+              />
+            </div>
+            <Btn onClick={build} disabled={loading||!asset.trim()} variant="primary" style={{padding:"12px 28px",whiteSpace:"nowrap"}}>
+              {loading ? "◆ BUILDING..." : "◆ BUILD STRATEGIES"}
+            </Btn>
+          </div>
+          <div style={{display:"flex",gap:16,marginTop:14,flexWrap:"wrap"}}>
+            {[["📈 Price Action","Technical trend analysis"],["🎯 Options Flow","Unusual activity signals"],["🌑 Dark Pool","Institutional block prints"],["⚡ 3 Strategies","Short / Medium / Long term"]].map(([icon,desc])=>(
+              <div key={icon} style={{display:"flex",alignItems:"center",gap:6}}>
+                <span style={{fontFamily:G.mono,fontSize:10,color:G.gold}}>{icon}</span>
+                <span style={{fontFamily:G.mono,fontSize:9,color:G.muted}}>{desc}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {err && <div style={{marginTop:8,background:G.redDim,border:`1px solid ${G.redBorder}`,borderRadius:8,padding:"11px 14px",fontFamily:G.mono,fontSize:12,color:G.red,marginBottom:16}}>{err}</div>}
+
+        {loading && (
+          <div style={{textAlign:"center",padding:"60px 0"}}>
+            <div style={{display:"inline-block",width:44,height:44,borderRadius:"50%",border:`2px solid #a78bfa22`,borderTop:"2px solid #a78bfa",animation:"spin 1s linear infinite"}}/>
+            <div style={{fontFamily:G.mono,fontSize:11,color:G.muted,marginTop:14}}>Scanning price action, options flow & dark pool data...</div>
+            <div style={{fontFamily:G.mono,fontSize:9,color:G.faint,marginTop:6}}>Building 3 strategies — this may take a few seconds</div>
+          </div>
+        )}
+
+        {result && (
+          <div ref={resultRef}>
+            {/* Market snapshot bar */}
+            <div style={{background:`linear-gradient(135deg,${G.bg4},${G.bg3})`,border:`1px solid ${G.border}`,borderRadius:12,padding:"16px 20px",marginBottom:20}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:16,marginBottom:12}}>
+                <div>
+                  <div style={{fontFamily:G.mono,fontSize:9,color:G.muted,marginBottom:2}}>{result.assetType}</div>
+                  <div style={{fontFamily:G.serif,fontSize:28,color:G.goldLight,fontWeight:700}}>{result.asset}</div>
+                  <div style={{fontFamily:G.mono,fontSize:13,color:G.gold,marginTop:2}}>~{result.currentPrice}</div>
+                </div>
+                <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                  <div style={{textAlign:"center",background:G.bg2,borderRadius:8,padding:"10px 16px"}}>
+                    <div style={{fontFamily:G.mono,fontSize:8,color:G.muted,letterSpacing:"0.1em",marginBottom:3}}>MARKET BIAS</div>
+                    <div style={{fontFamily:G.mono,fontSize:13,color:biasColor(result.marketBias),fontWeight:700}}>{result.marketBias}</div>
+                  </div>
+                  <div style={{textAlign:"center",background:G.bg2,borderRadius:8,padding:"10px 16px"}}>
+                    <div style={{fontFamily:G.mono,fontSize:8,color:G.muted,letterSpacing:"0.1em",marginBottom:3}}>IV ENVIRONMENT</div>
+                    <div style={{fontFamily:G.mono,fontSize:13,color:G.blue,fontWeight:700}}>{result.ivEnvironment||"--"}</div>
+                  </div>
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
+                {[
+                  {label:"PRICE ACTION", text:result.priceAction, color:G.gold},
+                  {label:"OPTIONS FLOW", text:result.optionsFlowSummary, color:G.blue},
+                  {label:"DARK POOL", text:result.darkPoolSummary, color:"#a78bfa"},
+                ].map(({label,text,color})=>(
+                  <div key={label} style={{background:G.bg2,borderRadius:8,padding:"12px 14px",border:`1px solid ${color}22`}}>
+                    <div style={{fontFamily:G.mono,fontSize:8,color:color,letterSpacing:"0.15em",marginBottom:5}}>{label}</div>
+                    <div style={{fontFamily:G.mono,fontSize:10,color:G.muted,lineHeight:1.7}}>{text||"--"}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Strategy cards */}
+            <div style={{fontFamily:G.mono,fontSize:9,color:G.gold+"88",letterSpacing:"0.2em",marginBottom:12}}>
+              {(result.strategies||[]).length} STRATEGIES RANKED BY PROBABILITY
+            </div>
+            {(result.strategies||[]).map((strat,i)=>(
+              <StrategyCard key={i} strat={strat} idx={i}/>
+            ))}
+
+            {/* Educational note */}
+            <div style={{background:"#020d20",border:`1px solid ${G.greenBorder}`,borderRadius:10,padding:"18px 22px",marginBottom:12}}>
+              <div style={{fontFamily:G.mono,fontSize:9,color:G.green,letterSpacing:"0.15em",marginBottom:6}}>📚 EDUCATIONAL INSIGHT</div>
+              <p style={{fontFamily:G.mono,fontSize:11,color:G.muted,lineHeight:1.9,margin:0}}>{result.educationalNote}</p>
+            </div>
+
+            {/* Disclaimer */}
+            <div style={{background:"#010d20",border:`1px solid ${G.gold}44`,borderRadius:10,padding:"16px 20px",marginBottom:8}}>
+              <div style={{fontFamily:G.mono,fontSize:9,color:G.gold,letterSpacing:"0.15em",marginBottom:5}}>⚠️ DISCLAIMER</div>
+              <p style={{fontFamily:G.mono,fontSize:11,color:G.gold+"88",lineHeight:1.9,margin:0}}>
+                For <strong>educational purposes only</strong>. Not financial advice. Options trading involves substantial risk of loss and is not suitable for all investors.
+                All strategies, strikes, premiums and probabilities shown are <strong>hypothetical and for learning only</strong>.
+                Always consult a licensed financial advisor before trading options.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{height:40}}/>
+    </div>
+  );
 }
 
 function AssetRow({asset,index,onToggle,onRemove,saving}){
@@ -797,7 +1197,7 @@ function Footer({setPage}){
     <div style={{fontFamily:G.serif,fontSize:15,color:G.goldLight,marginBottom:3}}>ELITE TRADES LLC</div>
     <div style={{fontFamily:G.mono,fontSize:8,color:"#1a2e48",letterSpacing:"0.2em",marginBottom:16}}>AI MARKET INTELLIGENCE</div>
     <div style={{display:"flex",gap:18,justifyContent:"center",marginBottom:14,flexWrap:"wrap"}}>
-      {[["HOME","home"],["ANALYZER","analyzer"]].map(([l,id])=>(
+      {[["HOME","home"],["ANALYZER","analyzer"],["STRATEGY","strategy"]].map(([l,id])=>(
         <button key={id} onClick={()=>setPage(id)} style={{background:"none",border:"none",color:"#2a4a6a",fontFamily:G.mono,fontSize:9,letterSpacing:"0.1em",cursor:"pointer"}}>{l}</button>
       ))}
     </div>
@@ -836,6 +1236,7 @@ export default function App(){
     {page==="login"&&<LoginPage setPage={setPage} onLogin={handleLogin}/>}
     {page==="signup"&&<SignupPage setPage={setPage} onLogin={handleLogin}/>}
     {page==="analyzer"&&(user?<AnalyzerPage user={user}/>:<AccessGate setPage={setPage}/>)}
+    {page==="strategy"&&<StrategyPage user={user} setPage={setPage}/>}
     {page==="admin"&&<AdminPage user={user}/>}
     {page==="home"&&<HomePage setPage={setPage} user={user}/>}
     <DisclaimerBar/>
