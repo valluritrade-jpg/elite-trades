@@ -77,8 +77,25 @@ async function sbSignOut() {
 
 async function sbGetProfile(userId) {
   if (!supabase) return null;
-  const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
-  return data;
+  try {
+    const timeout = new Promise(resolve => setTimeout(() => resolve(null), 4000));
+    const query = supabase.from("profiles").select("*").eq("id", userId).single()
+      .then(({data}) => data).catch(() => null);
+    return await Promise.race([query, timeout]);
+  } catch(e) { return null; }
+}
+
+// Build user object from session + profile (with safe fallback if profile missing)
+function buildUser(sessionUser, profile) {
+  const role = profile?.role || "free";
+  return {
+    id: sessionUser.id,
+    name: profile?.name || sessionUser.user_metadata?.name || sessionUser.email.split("@")[0],
+    email: sessionUser.email,
+    role,
+    isAdmin: role === "admin",
+    isPro: role === "pro" || role === "admin"
+  };
 }
 
 async function sbUpdateProfile(userId, updates) {
@@ -532,7 +549,7 @@ function LoginPage({setPage,onLogin}){
     const {data,error}=await sbSignIn(email.trim().toLowerCase(),pass);
     if(error){setErr(error);setLoading(false);return;}
     const profile=await sbGetProfile(data.user.id);
-    const u={id:data.user.id,name:profile?.name||email.split("@")[0],email:data.user.email,role:profile?.role||"free",isAdmin:profile?.role==="admin",isPro:profile?.role==="pro"||profile?.role==="admin"};
+    const u=buildUser(data.user, profile);
     onLogin(u);setLoading(false);
   };
 
@@ -575,7 +592,7 @@ function SignupPage({setPage,onLogin}){
     // If email confirmation is enabled, show verify message; otherwise auto-login
     if(data?.session){
       const profile=await sbGetProfile(data.user.id);
-      const u={id:data.user.id,name:profile?.name||name.trim(),email:data.user.email,role:profile?.role||"free",isAdmin:profile?.role==="admin",isPro:profile?.role==="pro"||profile?.role==="admin"};
+      const u=buildUser(data.user, profile);
       onLogin(u);
     } else {
       setVerifyNeeded(true);
@@ -1505,19 +1522,24 @@ export default function App(){
   useEffect(()=>{
     if(!supabase){setBooting(false);return;}
     // Get initial session
+    // Hard timeout — never stay stuck on loading screen
+    const bootTimeout = setTimeout(() => setBooting(false), 5000);
+
     supabase.auth.getSession().then(async({data:{session}})=>{
       if(session){
         const profile=await sbGetProfile(session.user.id);
-        setUser({id:session.user.id,name:profile?.name||session.user.email.split("@")[0],email:session.user.email,role:profile?.role||"free",isAdmin:profile?.role==="admin",isPro:profile?.role==="pro"||profile?.role==="admin"});
+        setUser(buildUser(session.user, profile));
       }
+      clearTimeout(bootTimeout);
       setBooting(false);
-    });
+    }).catch(()=>{ clearTimeout(bootTimeout); setBooting(false); });
+
     // Listen for auth changes
     const {data:{subscription}}=supabase.auth.onAuthStateChange(async(event,session)=>{
-      if(event==="SIGNED_OUT"||!session){setUser(null);}
-      else if(session){
+      if(event==="SIGNED_OUT"||!session){ setUser(null); }
+      else if(event==="SIGNED_IN"||event==="TOKEN_REFRESHED"||event==="USER_UPDATED"){
         const profile=await sbGetProfile(session.user.id);
-        setUser({id:session.user.id,name:profile?.name||session.user.email.split("@")[0],email:session.user.email,role:profile?.role||"free",isAdmin:profile?.role==="admin",isPro:profile?.role==="pro"||profile?.role==="admin"});
+        setUser(buildUser(session.user, profile));
       }
     });
     return()=>subscription.unsubscribe();
