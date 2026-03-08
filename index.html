@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Elite Trades LLC — AI-powered market intelligence and trading education platform." />
     <meta name="theme-color" content="#020a18" />
@@ -13,26 +13,6 @@
     <style>
       html, body, #root { margin: 0; padding: 0; background: #020a18; min-height: 100vh; }
     </style>
-    <!-- GitHub Pages SPA + Supabase auth callback restore -->
-    <script>
-      (function() {
-        var search = window.location.search;
-        if (search.indexOf('?p=') === 0) {
-          var params = search.slice(1); // remove leading ?
-          var parts = {};
-          params.split('&').forEach(function(part) {
-            var eq = part.indexOf('=');
-            if (eq !== -1) parts[part.slice(0, eq)] = part.slice(eq + 1);
-          });
-          var path = (parts['p'] || '/').replace(/~and~/g, '&');
-          var query = parts['q'] ? '?' + parts['q'].replace(/~and~/g, '&') : '';
-          // Restore Supabase hash (access_token, type, etc.)
-          var hash = parts['h'] ? decodeURIComponent(parts['h']) : window.location.hash;
-          var base = window.location.pathname.split('/').slice(0, 2).join('/');
-          window.history.replaceState(null, null, base + '/' + path + query + hash);
-        }
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>
