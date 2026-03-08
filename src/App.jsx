@@ -83,8 +83,25 @@ async function sbGetProfile(userId) {
       .select("*")
       .eq("id", userId)
       .maybeSingle();
-    return data || null;
-  } catch(e) { return null; }
+    if (data) return data;
+    // Profile missing — get user info and upsert it
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    const { data: inserted } = await supabase
+      .from("profiles")
+      .upsert({
+        id: userId,
+        email: user.email,
+        name: user.user_metadata?.name || user.email.split("@")[0],
+        role: "free"
+      }, { onConflict: "id" })
+      .select()
+      .single();
+    return inserted || null;
+  } catch(e) {
+    console.error("sbGetProfile error:", e);
+    return null;
+  }
 }
 
 // Build user object from session + profile (with safe fallback if profile missing)
@@ -551,14 +568,8 @@ function LoginPage({setPage,onLogin}){
     if(!email||!pass){setErr("Please fill in all fields.");setLoading(false);return;}
     const {data,error}=await sbSignIn(email.trim().toLowerCase(),pass);
     if(error){setErr(error);setLoading(false);return;}
-    // Navigate immediately with basic info, profile loads via onAuthStateChange
-    const u=buildUser(data.user, null);
-    onLogin(u);
-    // Fetch profile in background and update role
-    sbGetProfile(data.user.id).then(profile=>{
-      if(profile) onLogin(buildUser(data.user, profile));
-    });
     setLoading(false);
+    onLogin(data.user);
   };
 
   const handleReset=async()=>{
@@ -599,9 +610,7 @@ function SignupPage({setPage,onLogin}){
     if(error){setErr(error);setLoading(false);return;}
     // If email confirmation is enabled, show verify message; otherwise auto-login
     if(data?.session){
-      const profile=await sbGetProfile(data.user.id);
-      const u=buildUser(data.user, profile);
-      onLogin(u);
+      onLogin(data.user);
     } else {
       setVerifyNeeded(true);
     }
@@ -1555,7 +1564,24 @@ export default function App(){
 
   useEffect(()=>{window.scrollTo(0,0);},[page]);
 
-  const handleLogin=(u)=>{setUser(u);setPage(u.isAdmin?"admin":"analyzer");};
+  const handleLogin=(u)=>{
+    setUser(u);
+    setPage(u.isAdmin?"admin":"analyzer");
+  };
+  const handleLoginWithProfile=async(sessionUser)=>{
+    // Set basic user first so UI unblocks
+    const basic=buildUser(sessionUser,null);
+    setUser(basic);
+    // Fetch real profile and update role
+    const profile=await sbGetProfile(sessionUser.id);
+    if(profile){
+      const full=buildUser(sessionUser,profile);
+      setUser(full);
+      setPage(full.isAdmin?"admin":"analyzer");
+    } else {
+      setPage("analyzer");
+    }
+  };
   const handleLogout=async()=>{await sbSignOut();setUser(null);setPage("home");};
 
   if(booting)return <div style={{background:G.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -1575,8 +1601,8 @@ export default function App(){
     `}</style>
     <TickerTape/>
     <Nav page={page} setPage={setPage} user={user} onLogout={handleLogout}/>
-    {page==="login"&&<LoginPage setPage={setPage} onLogin={handleLogin}/>}
-    {page==="signup"&&<SignupPage setPage={setPage} onLogin={handleLogin}/>}
+    {page==="login"&&<LoginPage setPage={setPage} onLogin={handleLoginWithProfile}/>}
+    {page==="signup"&&<SignupPage setPage={setPage} onLogin={handleLoginWithProfile}/>}
     {page==="profile"&&(user?<ProfilePage user={user} setUser={setUser} setPage={setPage}/>:<AccessGate setPage={setPage}/>)}
     {page==="analyzer"&&(user?<AnalyzerPage user={user}/>:<AccessGate setPage={setPage}/>)}
     {page==="strategy"&&<StrategyPage user={user} setPage={setPage}/>}
