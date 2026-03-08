@@ -4,14 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 // ─── Supabase client ──────────────────────────────────────────────────────────
 const SUPABASE_URL  = (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_URL)  ? import.meta.env.VITE_SUPABASE_URL  : null;
 const SUPABASE_KEY  = (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_ANON_KEY) ? import.meta.env.VITE_SUPABASE_ANON_KEY : null;
-const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: {
-    flowType: "implicit",
-    persistSession: true,
-    detectSessionInUrl: true,
-    autoRefreshToken: true,
-  }
-}) : null;
+const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 const G = {
   gold:"#4f9cf9",goldLight:"#a8d4ff",goldDim:"#4f9cf944",
@@ -65,10 +58,14 @@ async function saveAssetConfig(cfg) { return storageSet("et_asset_config", cfg, 
 async function sbSignUp(email, password, name) {
   if (!supabase) return { error: "Supabase not configured." };
   try {
-    const { data, error } = await supabase.auth.signUp({
+    const timeout = new Promise((_,reject) => 
+      setTimeout(()=>reject(new Error("Sign up timed out. Please try again.")), 10000)
+    );
+    const result = Promise.resolve(supabase.auth.signUp({
       email, password,
       options: { data: { name } }
-    });
+    }));
+    const { data, error } = await Promise.race([result, timeout]);
     return { data, error: error?.message };
   } catch(e) { return { error: e.message }; }
 }
@@ -76,8 +73,11 @@ async function sbSignUp(email, password, name) {
 async function sbSignIn(email, password) {
   if (!supabase) return { error: "Supabase not configured." };
   try {
-    const timeout = new Promise((_,reject) => setTimeout(()=>reject(new Error("Sign in timed out. Please try again.")), 8000));
-    const result = supabase.auth.signInWithPassword({ email, password });
+    const timeout = new Promise((_,reject) => 
+      setTimeout(()=>reject(new Error("Sign in timed out. Please try again.")), 10000)
+    );
+    // Wrap in Promise.resolve to ensure native Promise for race
+    const result = Promise.resolve(supabase.auth.signInWithPassword({ email, password }));
     const { data, error } = await Promise.race([result, timeout]);
     return { data, error: error?.message };
   } catch(e) { return { error: e.message }; }
