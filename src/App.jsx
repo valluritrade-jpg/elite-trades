@@ -121,29 +121,6 @@ function buildUser(sessionUser, profile) {
   };
 }
 
-// Temporary debug component — remove after role issue is resolved
-function DebugPanel({user}) {
-  const [dbRole, setDbRole] = useState(null);
-  const [err, setErr] = useState(null);
-  useEffect(()=>{
-    if(!user?.id || !supabase) return;
-    supabase.from("profiles").select("role,email").eq("id", user.id).maybeSingle()
-      .then(({data, error})=>{
-        if(error) setErr(error.message);
-        else setDbRole(data?.role || "NOT FOUND");
-      });
-  },[user]);
-  if(!user) return null;
-  return (
-    <div style={{position:"fixed",bottom:10,right:10,zIndex:9999,background:"#000d1a",border:"1px solid #4f9cf9",borderRadius:8,padding:"10px 14px",fontFamily:"monospace",fontSize:11,color:"#e0eeff",maxWidth:300}}>
-      <div style={{color:"#4f9cf9",marginBottom:4}}>🔍 AUTH DEBUG</div>
-      <div>User ID: <span style={{color:"#a8d4ff"}}>{user.id?.slice(0,8)}...</span></div>
-      <div>UI Role: <span style={{color:user.role==="admin"?"#34d399":"#f87171"}}>{user.role}</span></div>
-      <div>DB Role: <span style={{color:dbRole==="admin"?"#34d399":"#f87171"}}>{dbRole||"loading..."}</span></div>
-      {err&&<div style={{color:"#f87171"}}>Error: {err}</div>}
-    </div>
-  );
-}
 
 async function sbUpdateProfile(userId, updates) {
   if (!supabase) return { error: "Supabase not configured." };
@@ -1621,7 +1598,6 @@ export default function App(){
     `}</style>
     <TickerTape/>
     <Nav page={page} setPage={setPage} user={user} onLogout={handleLogout}/>
-    <DebugPanel user={user}/>
     {page==="login"&&<LoginPage setPage={setPage} onLogin={handleLogin}/>}
     {page==="signup"&&<SignupPage setPage={setPage} onLogin={handleLogin}/>}
     {page==="profile"&&(user?<ProfilePage user={user} setUser={setUser} setPage={setPage}/>:<AccessGate setPage={setPage}/>)}
