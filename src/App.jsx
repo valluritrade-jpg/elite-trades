@@ -4,7 +4,14 @@ import { createClient } from "@supabase/supabase-js";
 // ─── Supabase client ──────────────────────────────────────────────────────────
 const SUPABASE_URL  = (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_URL)  ? import.meta.env.VITE_SUPABASE_URL  : null;
 const SUPABASE_KEY  = (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_ANON_KEY) ? import.meta.env.VITE_SUPABASE_ANON_KEY : null;
-const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    flowType: "implicit",
+    persistSession: true,
+    detectSessionInUrl: true,
+    autoRefreshToken: true,
+  }
+}) : null;
 
 const G = {
   gold:"#4f9cf9",goldLight:"#a8d4ff",goldDim:"#4f9cf944",
@@ -81,31 +88,22 @@ async function sbSignOut() {
 
 async function sbGetProfile(userId) {
   if (!supabase) return null;
-  try {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .maybeSingle();
-    if (data) return data;
-    // Profile missing — get user info and upsert it
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-    const { data: inserted } = await supabase
-      .from("profiles")
-      .upsert({
-        id: userId,
-        email: user.email,
-        name: user.user_metadata?.name || user.email.split("@")[0],
-        role: "free"
-      }, { onConflict: "id" })
-      .select()
-      .single();
-    return inserted || null;
-  } catch(e) {
-    console.error("sbGetProfile error:", e);
-    return null;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .maybeSingle();
+      if (data) return data;
+      if (error) console.warn("sbGetProfile attempt", i+1, error.message);
+      if (i < 2) await new Promise(r => setTimeout(r, 500));
+    } catch(e) {
+      console.warn("sbGetProfile catch", i+1, e.message);
+      if (i < 2) await new Promise(r => setTimeout(r, 500));
+    }
   }
+  return null;
 }
 
 // Build user object from session + profile (with safe fallback if profile missing)
