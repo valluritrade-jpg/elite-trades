@@ -57,17 +57,21 @@ async function saveAssetConfig(cfg) { return storageSet("et_asset_config", cfg, 
 // ─── Supabase auth helpers ────────────────────────────────────────────────────
 async function sbSignUp(email, password, name) {
   if (!supabase) return { error: "Supabase not configured." };
-  const { data, error } = await supabase.auth.signUp({
-    email, password,
-    options: { data: { name } }
-  });
-  return { data, error: error?.message };
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email, password,
+      options: { data: { name } }
+    });
+    return { data, error: error?.message };
+  } catch(e) { return { error: e.message }; }
 }
 
 async function sbSignIn(email, password) {
   if (!supabase) return { error: "Supabase not configured." };
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  return { data, error: error?.message };
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    return { data, error: error?.message };
+  } catch(e) { return { error: e.message }; }
 }
 
 async function sbSignOut() {
@@ -629,14 +633,13 @@ function SignupPage({setPage,onLogin}){
     if(pass.length<8){setErr("Password must be at least 8 characters.");setLoading(false);return;}
     if(pass!==conf){setErr("Passwords do not match.");setLoading(false);return;}
     if(!agree){setErr("You must agree to the disclaimer.");setLoading(false);return;}
+    // Safety timeout — never stay stuck
+    const t=setTimeout(()=>{setLoading(false);setErr("Request timed out. Check your connection and try again.");},10000);
     const {data,error}=await sbSignUp(email.trim().toLowerCase(),pass,name.trim());
+    clearTimeout(t);
     if(error){setErr(error);setLoading(false);return;}
-    // If email confirmation is enabled, show verify message; otherwise auto-login
-    if(data?.session){
-      // onAuthStateChange handles login from here
-    } else {
-      setVerifyNeeded(true);
-    }
+    // If email confirmation is on, show verify screen; otherwise onAuthStateChange fires
+    if(!data?.session){setVerifyNeeded(true);}
     setLoading(false);
   };
 
