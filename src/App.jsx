@@ -777,24 +777,6 @@ function StrategyCard({strat, idx}) {
           </div>
         )}
 
-        {/* Options Flow + Dark Pool signals */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
-          {[
-            {label:"OPTIONS FLOW SIGNALS", signals:strat.flowSignals, color:G.blue},
-            {label:"DARK POOL SIGNALS", signals:strat.darkPoolSignals, color:"#a78bfa"},
-          ].map(({label,signals,color})=>(
-            <div key={label} style={{background:G.bg2,borderRadius:8,padding:"14px 16px",border:`1px solid ${color}22`}}>
-              <div style={{fontFamily:G.mono,fontSize:8,color:color,letterSpacing:"0.15em",marginBottom:8}}>{label}</div>
-              {(signals||[]).map((s,i)=>(
-                <div key={i} style={{display:"flex",gap:7,marginBottom:6}}>
-                  <span style={{color,fontSize:9,marginTop:1,flexShrink:0}}>◆</span>
-                  <span style={{fontFamily:G.mono,fontSize:10,color:G.muted,lineHeight:1.6}}>{s}</span>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-
         {/* Risk Management table */}
         {strat.riskManagement && (
           <div style={{marginBottom:8}}>
@@ -831,27 +813,102 @@ function StrategyPage({user, setPage}) {
   const [result, setResult] = useState(null);
   const resultRef = useRef(null);
 
+  // ── Live price fetch ─────────────────────────────────────────────────────────
+  const fetchLivePrice = async (sym) => {
+    // Crypto via Binance (no key, great CORS)
+    const cryptoMap = {
+      "BTC":"BTCUSDT","ETH":"ETHUSDT","SOL":"SOLUSDT","BNB":"BNBUSDT",
+      "XRP":"XRPUSDT","DOGE":"DOGEUSDT","ADA":"ADAUSDT","AVAX":"AVAXUSDT",
+      "MATIC":"MATICUSDT","LINK":"LINKUSDT","DOT":"DOTUSDT","UNI":"UNIUSDT"
+    };
+    const cleanSym = sym.replace("/USD","").replace("/USDT","").replace("USD","");
+    if (cryptoMap[cleanSym]) {
+      try {
+        const r = await fetch(
+          `https://api.binance.com/api/v3/ticker/24hr?symbol=${cryptoMap[cleanSym]}`,
+          { signal: AbortSignal.timeout(5000) }
+        );
+        if (r.ok) {
+          const d = await r.json();
+          const price = parseFloat(d.lastPrice);
+          const chg = parseFloat(d.priceChangePercent);
+          return { price, chg, source: "Binance" };
+        }
+      } catch(e) {}
+    }
+    // Stocks/ETFs/Forex/Commodities via Finnhub
+    const fhKey = VITE_FINNHUB_KEY;
+    if (fhKey) {
+      const fhSym = sym === "GOLD" ? "OANDA:XAU_USD"
+        : sym === "EUR/USD" ? "OANDA:EUR_USD"
+        : sym === "OIL" ? "OANDA:USOIL_USD"
+        : sym;
+      try {
+        const r = await fetch(
+          `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(fhSym)}&token=${fhKey}`,
+          { signal: AbortSignal.timeout(5000) }
+        );
+        if (r.ok) {
+          const d = await r.json();
+          if (d.c && d.c > 0) {
+            const chg = d.pc > 0 ? ((d.c - d.pc) / d.pc) * 100 : 0;
+            return { price: d.c, chg, source: "Finnhub" };
+          }
+        }
+      } catch(e) {}
+    }
+    // Yahoo Finance proxy via allorigins (fallback)
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`;
+      const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+      const r = await fetch(proxy, { signal: AbortSignal.timeout(6000) });
+      if (r.ok) {
+        const d = await r.json();
+        const quote = d?.chart?.result?.[0]?.meta;
+        if (quote?.regularMarketPrice) {
+          const prev = quote.chartPreviousClose || quote.previousClose || quote.regularMarketPrice;
+          const chg = prev > 0 ? ((quote.regularMarketPrice - prev) / prev) * 100 : 0;
+          return { price: quote.regularMarketPrice, chg, source: "Yahoo" };
+        }
+      }
+    } catch(e) {}
+    return null;
+  };
+
   const build = async () => {
     if (!asset.trim()) return;
     setLoading(true); setErr(null); setResult(null);
     const sym = asset.trim().toUpperCase();
-    const isCrypto = ["BTC","ETH","SOL","BNB","XRP","DOGE","ADA"].some(c=>sym.includes(c));
+    const isCrypto = ["BTC","ETH","SOL","BNB","XRP","DOGE","ADA","AVAX","MATIC","LINK","DOT"].some(c=>sym.includes(c));
     const assetNote = isCrypto
       ? "This is a crypto asset — use perpetual futures/options language (calls/puts via Deribit or CME). Use realistic crypto strike increments."
       : "This is an equity/ETF — use standard equity options (100 shares per contract). Use realistic strike increments for the asset price range.";
 
+    // Fetch live price first, inject into prompt
+    const liveData = await fetchLivePrice(sym);
+    const today = new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+    const priceContext = liveData
+      ? `LIVE MARKET DATA (as of ${today}): Current price = $${liveData.price.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}, 24h change = ${liveData.chg >= 0 ? "+" : ""}${liveData.chg.toFixed(2)}% (source: ${liveData.source}). Base ALL strikes, premiums, breakevens, and price targets on this exact current price. Do NOT use outdated prices from your training data.`
+      : `Today is ${today}. Use your best knowledge of the current approximate market price for ${sym}. Be as accurate as possible with current pricing.`;
+
+    const currentPriceStr = liveData
+      ? `$${liveData.price.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`
+      : "See analysis";
+
     const prompt = `You are a professional options trading educator at Elite Trades LLC. A student wants to learn about options strategies for ${sym}.
+
+${priceContext}
 
 ${assetNote}
 
-Analyze the current price action, typical options flow patterns, and dark pool signals for ${sym}. Then produce 3 distinct educational options strategies: one short-term (1-2 weeks), one medium-term (30-45 days), and one long-term (60-90 days).
+Based on the current price above, produce 3 distinct educational options strategies: one short-term (1-2 weeks), one medium-term (30-45 days), and one long-term (60-90 days). All strikes MUST be realistic relative to the current price provided above.
 
-Return ONLY a single valid JSON object — no markdown, no preamble. Keep strings under 100 chars. Use realistic, educational approximate values.
+Return ONLY a single valid JSON object — no markdown, no preamble. Keep strings under 100 chars.
 
 {
   "asset": "${sym}",
   "assetType": "",
-  "currentPrice": "",
+  "currentPrice": "${currentPriceStr}",
   "priceAction": "",
   "optionsFlowSummary": "",
   "darkPoolSummary": "",
@@ -916,7 +973,10 @@ Return ONLY a single valid JSON object — no markdown, no preamble. Keep string
       const start = text.indexOf("{");
       const end = text.lastIndexOf("}");
       if (start === -1 || end === -1) throw new Error("No valid JSON returned.");
-      setResult(JSON.parse(text.slice(start, end+1)));
+      const parsed = JSON.parse(text.slice(start, end+1));
+      // Override currentPrice with live data if fetched
+      if (liveData) parsed.currentPrice = currentPriceStr;
+      setResult(parsed);
       setTimeout(()=>{ if(resultRef.current) resultRef.current.scrollIntoView({behavior:"smooth"}); }, 120);
     } catch(e) { setErr("Analysis failed: " + (e.message || "Unknown error")); }
     setLoading(false);
