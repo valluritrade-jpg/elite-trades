@@ -1563,30 +1563,27 @@ export default function App(){
   useEffect(()=>{
     if(!supabase){setBooting(false);return;}
     // Get initial session
-    const bootTimeout = setTimeout(() => setBooting(false), 6000);
+    const bootTimeout = setTimeout(() => setBooting(false), 5000);
 
-    // onAuthStateChange is the single source of truth for all auth state
+    // Get initial session on page load
+    supabase.auth.getSession().then(async({data:{session}})=>{
+      if(session){
+        const profile = await sbGetProfile(session.user.id);
+        setUser(buildUser(session.user, profile));
+      }
+      clearTimeout(bootTimeout);
+      setBooting(false);
+    }).catch(()=>{ clearTimeout(bootTimeout); setBooting(false); });
+
+    // Listen for sign in / sign out events only
     const {data:{subscription}}=supabase.auth.onAuthStateChange(async(event,session)=>{
-      console.log("auth event:", event, "session:", !!session);
       if(event==="SIGNED_OUT"||!session){
         setUser(null);
-        setBooting(false);
-        clearTimeout(bootTimeout);
-      } else if(event==="SIGNED_IN"||event==="TOKEN_REFRESHED"||event==="USER_UPDATED"||event==="INITIAL_SESSION"){
+      } else if(event==="SIGNED_IN"){
         const profile=await sbGetProfile(session.user.id);
-        console.log("profile fetched:", profile);
         const u=buildUser(session.user, profile);
-        console.log("built user:", u);
         setUser(u);
-        // Navigate on fresh sign in
-        if(event==="SIGNED_IN"){
-          setPage(u.isAdmin?"admin":"analyzer");
-        }
-        setBooting(false);
-        clearTimeout(bootTimeout);
-      } else {
-        setBooting(false);
-        clearTimeout(bootTimeout);
+        setPage(u.isAdmin?"admin":"analyzer");
       }
     });
     return()=>subscription.unsubscribe();
@@ -1595,13 +1592,7 @@ export default function App(){
   useEffect(()=>{window.scrollTo(0,0);},[page]);
 
   const handleLogin=(u)=>{ setUser(u); setPage(u.isAdmin?"admin":"analyzer"); };
-  const handleLogout=async()=>{
-    await sbSignOut();
-    setUser(null);
-    setPage("home");
-    // Force reload to clear any cached auth state
-    setTimeout(()=>window.location.reload(), 300);
-  };
+  const handleLogout=async()=>{await sbSignOut();setUser(null);setPage("home");};
 
   if(booting)return <div style={{background:G.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
     <div style={{textAlign:"center"}}>
