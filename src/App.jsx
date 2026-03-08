@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 // ─── Supabase client ──────────────────────────────────────────────────────────
-const SUPABASE_URL  = (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_URL)  ? import.meta.env.VITE_SUPABASE_URL  : null;
-const SUPABASE_KEY  = (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_ANON_KEY) ? import.meta.env.VITE_SUPABASE_ANON_KEY : null;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || null;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || null;
 const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 const G = {
@@ -596,7 +596,12 @@ function LoginPage({setPage,onLogin}){
     const {data,error}=await sbSignIn(email.trim().toLowerCase(),pass);
     setLoading(false);
     if(error){setErr(error);return;}
-    // onAuthStateChange handles navigation
+    // Handle navigation directly — don't rely on onAuthStateChange
+    if(data?.user){
+      const profile=await sbGetProfile(data.user.id);
+      const u=buildUser(data.user, profile);
+      onLogin(u);
+    }
   };
 
   const handleReset=async()=>{
@@ -1593,7 +1598,10 @@ export default function App(){
 
   useEffect(()=>{window.scrollTo(0,0);},[page]);
 
-  const handleLogin=(u)=>{ setUser(u); setPage(u.isAdmin?"admin":"analyzer"); };
+  const handleLogin=(u)=>{
+    setUser(u);
+    setPage(u.isAdmin?"admin":"analyzer");
+  };
   const handleLogout=async()=>{await sbSignOut();setUser(null);setPage("home");};
 
   if(booting)return <div style={{background:G.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
