@@ -192,12 +192,10 @@ function TypeBadge({type}){const colors={Crypto:"#60a5fa",Stock:"#4ade80",ETF:"#
 // ─── Live Ticker ──────────────────────────────────────────────────────────────
 // Finnhub API key — set VITE_FINNHUB_API_KEY in GitHub Secrets for deployed site
 // In artifact preview, enter it via the key button in the ticker bar
-const VITE_FINNHUB_KEY = (typeof import.meta !== "undefined" && import.meta.env?.VITE_FINNHUB_API_KEY)
-  ? import.meta.env.VITE_FINNHUB_API_KEY : null;
+const VITE_FINNHUB_KEY = import.meta.env.VITE_FINNHUB_API_KEY || null;
 
 // Anthropic API key — baked in at build time via VITE_ANTHROPIC_API_KEY secret
-const VITE_ANTHROPIC_KEY = (typeof import.meta !== "undefined" && import.meta.env?.VITE_ANTHROPIC_API_KEY)
-  ? import.meta.env.VITE_ANTHROPIC_API_KEY : null;
+const VITE_ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || null;
 
 // Seed prices shown instantly before live data loads
 const SEED = {
@@ -573,11 +571,16 @@ function LoginPage({setPage,onLogin}){
     const {data,error}=await sbSignIn(email.trim().toLowerCase(),pass);
     setLoading(false);
     if(error){setErr(error);return;}
-    // Handle navigation directly — don't rely on onAuthStateChange
     if(data?.user){
-      const profile=await sbGetProfile(data.user.id);
-      const u=buildUser(data.user, profile);
-      onLogin(u);
+      // Navigate immediately with basic info
+      const basic=buildUser(data.user, null);
+      onLogin(basic);
+      // Fetch profile in background and update role
+      sbGetProfile(data.user.id).then(profile=>{
+        if(profile){
+          onLogin(buildUser(data.user, profile));
+        }
+      }).catch(()=>{});
     }
   };
 
