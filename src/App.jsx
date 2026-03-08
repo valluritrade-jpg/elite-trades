@@ -1,4 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+// ─── Supabase client ──────────────────────────────────────────────────────────
+const SUPABASE_URL  = (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_URL)  ? import.meta.env.VITE_SUPABASE_URL  : null;
+const SUPABASE_KEY  = (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_ANON_KEY) ? import.meta.env.VITE_SUPABASE_ANON_KEY : null;
+const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 const G = {
   gold:"#4f9cf9",goldLight:"#a8d4ff",goldDim:"#4f9cf944",
@@ -34,44 +40,12 @@ const DEFAULT_WEEKLY=[
 ];
 const ASSET_TYPES=["Crypto","Stock","ETF","Forex","Commodity","Index","Other"];
 
-// Storage — use explicit if/else to avoid async nullish coalescing transpiler issues
+// ─── Storage helpers (window.storage — used ONLY for asset config / shared data)
 async function storageGet(key, shared) {
-  try {
-    const r = await window.storage.get(key, shared || false);
-    return r ? JSON.parse(r.value) : null;
-  } catch(e) { return null; }
+  try { const r = await window.storage.get(key, shared||false); return r ? JSON.parse(r.value) : null; } catch(e) { return null; }
 }
 async function storageSet(key, val, shared) {
-  try {
-    await window.storage.set(key, JSON.stringify(val), shared || false);
-    return true;
-  } catch(e) { return false; }
-}
-async function storageDel(key, shared) {
-  try { await window.storage.delete(key, shared || false); } catch(e) {}
-}
-// Built-in default admin — always available even if storage is empty
-const DEFAULT_ADMIN = {
-  "admin@elitetrades.com": {
-    name: "Admin",
-    email: "admin@elitetrades.com",
-    password: btoa("EliteTrades1!"),
-    isAdmin: true,
-    createdAt: "2024-01-01T00:00:00.000Z"
-  }
-};
-
-async function getUsers() {
-  const r = await storageGet("et_users", false);
-  const stored = r !== null ? r : {};
-  // Merge so default admin always exists unless overwritten
-  return Object.assign({}, DEFAULT_ADMIN, stored);
-}
-async function saveUsers(u) { return storageSet("et_users", u, false); }
-async function getSession() { return storageGet("et_session", false); }
-async function saveSession(u) {
-  if (u) { return storageSet("et_session", u, false); }
-  return storageDel("et_session", false);
+  try { await window.storage.set(key, JSON.stringify(val), shared||false); return true; } catch(e) { return false; }
 }
 async function getAssetConfig() {
   const cfg = await storageGet("et_asset_config", true);
@@ -79,6 +53,73 @@ async function getAssetConfig() {
   return { daily: DEFAULT_DAILY, weekly: DEFAULT_WEEKLY, lastUpdated: null, updatedBy: null };
 }
 async function saveAssetConfig(cfg) { return storageSet("et_asset_config", cfg, true); }
+
+// ─── Supabase auth helpers ────────────────────────────────────────────────────
+async function sbSignUp(email, password, name) {
+  if (!supabase) return { error: "Supabase not configured." };
+  const { data, error } = await supabase.auth.signUp({
+    email, password,
+    options: { data: { name } }
+  });
+  return { data, error: error?.message };
+}
+
+async function sbSignIn(email, password) {
+  if (!supabase) return { error: "Supabase not configured." };
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  return { data, error: error?.message };
+}
+
+async function sbSignOut() {
+  if (!supabase) return;
+  await supabase.auth.signOut();
+}
+
+async function sbGetProfile(userId) {
+  if (!supabase) return null;
+  const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
+  return data;
+}
+
+async function sbUpdateProfile(userId, updates) {
+  if (!supabase) return { error: "Supabase not configured." };
+  const { error } = await supabase.from("profiles").update(updates).eq("id", userId);
+  return { error: error?.message };
+}
+
+async function sbGetAllUsers() {
+  if (!supabase) return [];
+  const { data } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
+  return data || [];
+}
+
+async function sbUpdateUserRole(userId, role) {
+  if (!supabase) return { error: "Supabase not configured." };
+  const { error } = await supabase.from("profiles").update({ role }).eq("id", userId);
+  return { error: error?.message };
+}
+
+// Usage tracking
+async function sbGetUsage(userId, feature) {
+  if (!supabase) return 0;
+  const today = new Date().toISOString().split("T")[0];
+  const { data } = await supabase.from("usage_tracking")
+    .select("count").eq("user_id", userId).eq("feature", feature).eq("date", today).single();
+  return data?.count || 0;
+}
+
+async function sbIncrementUsage(userId, feature) {
+  if (!supabase) return;
+  const today = new Date().toISOString().split("T")[0];
+  await supabase.rpc("increment_usage", { p_user_id: userId, p_feature: feature, p_date: today })
+    .catch(async () => {
+      // fallback: upsert manually
+      await supabase.from("usage_tracking").upsert(
+        { user_id: userId, feature, date: today, count: 1 },
+        { onConflict: "user_id,feature,date", ignoreDuplicates: false }
+      );
+    });
+}
 
 // Atoms
 function Label({children,style:s={}}){return <div style={{fontFamily:G.mono,fontSize:10,color:G.gold+"99",letterSpacing:"0.15em",marginBottom:8,...s}}>{children}</div>;}
@@ -323,6 +364,12 @@ function DisclaimerBar(){
   return <div style={{background:"#010d20",borderTop:`1px solid ${G.gold}55`,padding:"10px 24px",textAlign:"center",fontFamily:G.mono,fontSize:11,color:G.gold+"99",lineHeight:1.5}}>{DISCLAIMER}</div>;
 }
 
+function RoleBadge({role}){
+  const cfg={admin:{color:"#60a5fa",label:"ADMIN"},pro:{color:"#a78bfa",label:"PRO"},free:{color:G.muted,label:"FREE"}};
+  const c=cfg[role]||cfg.free;
+  return <span style={{fontFamily:G.mono,fontSize:8,color:c.color,background:c.color+"18",border:`1px solid ${c.color}44`,borderRadius:100,padding:"2px 7px",letterSpacing:"0.08em"}}>{c.label}</span>;
+}
+
 function Nav({page,setPage,user,onLogout}){
   return <nav style={{background:"#020a18f0",backdropFilter:"blur(12px)",borderBottom:`1px solid ${G.border}`,padding:"0 20px",display:"flex",alignItems:"center",justifyContent:"space-between",height:60,position:"sticky",top:0,zIndex:100}}>
     <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}} onClick={()=>setPage("home")}>
@@ -332,7 +379,7 @@ function Nav({page,setPage,user,onLogout}){
         <div style={{fontFamily:G.mono,fontSize:8,color:G.gold+"88",letterSpacing:"0.2em"}}>AI MARKET INTELLIGENCE</div>
       </div>
     </div>
-    <div style={{display:"flex",alignItems:"center",gap:4}}>
+    <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
       {[["HOME","home"],["ANALYZER","analyzer"],["STRATEGY","strategy"]].map(([label,id])=>(
         <button key={id} onClick={()=>setPage(id)} style={{background:page===id?G.gold+"18":"transparent",border:page===id?`1px solid ${G.gold}55`:"1px solid transparent",color:page===id?G.goldLight:"#667",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontFamily:G.mono,fontSize:10,letterSpacing:"0.1em"}}>
           {label}
@@ -341,8 +388,13 @@ function Nav({page,setPage,user,onLogout}){
       {user?.isAdmin&&<button onClick={()=>setPage("admin")} style={{background:page==="admin"?"#0a1a40":"transparent",border:page==="admin"?`1px solid #60a5fa55`:"1px solid transparent",color:page==="admin"?"#60a5fa":"#555",padding:"6px 12px",borderRadius:4,cursor:"pointer",fontFamily:G.mono,fontSize:10}}>⚙ ADMIN</button>}
       {user?(
         <div style={{display:"flex",alignItems:"center",gap:8,marginLeft:8,paddingLeft:8,borderLeft:`1px solid ${G.border}`}}>
-          <div style={{width:28,height:28,borderRadius:"50%",background:user.isAdmin?"#0a1a40":G.gold+"22",border:`1px solid ${user.isAdmin?"#60a5fa55":G.gold+"44"}`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:G.serif,fontSize:12,color:user.isAdmin?"#60a5fa":G.gold,fontWeight:700}}>{user.name.charAt(0).toUpperCase()}</div>
-          <div style={{fontFamily:G.mono,fontSize:10,color:G.goldLight}}>{user.name}{user.isAdmin&&<div style={{fontSize:8,color:"#60a5fa"}}>ADMIN</div>}</div>
+          <div onClick={()=>setPage("profile")} style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer"}} title="My Profile">
+            <div style={{width:28,height:28,borderRadius:"50%",background:user.isAdmin?"#0a1a40":user.isPro?"#1a0a40":G.gold+"22",border:`1px solid ${user.isAdmin?"#60a5fa55":user.isPro?"#a78bfa55":G.gold+"44"}`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:G.serif,fontSize:12,color:user.isAdmin?"#60a5fa":user.isPro?"#a78bfa":G.gold,fontWeight:700}}>{user.name.charAt(0).toUpperCase()}</div>
+            <div>
+              <div style={{fontFamily:G.mono,fontSize:10,color:G.goldLight}}>{user.name}</div>
+              <RoleBadge role={user.role||"free"}/>
+            </div>
+          </div>
           <button onClick={onLogout} style={{background:"transparent",border:`1px solid ${G.redBorder}`,borderRadius:4,color:G.red,padding:"4px 8px",cursor:"pointer",fontFamily:G.mono,fontSize:9}}>OUT</button>
         </div>
       ):(
@@ -353,6 +405,106 @@ function Nav({page,setPage,user,onLogout}){
       )}
     </div>
   </nav>;
+}
+
+
+// ─── Profile Page ─────────────────────────────────────────────────────────────
+function ProfilePage({user, setUser, setPage}) {
+  const [name, setName] = useState(user?.name || "");
+  const [curPass, setCurPass] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [confPass, setConfPass] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [usage, setUsage] = useState({analyzer:0, strategy:0});
+
+  useEffect(()=>{
+    if(user?.id){
+      sbGetUsage(user.id,"analyzer").then(c=>setUsage(u=>({...u,analyzer:c})));
+      sbGetUsage(user.id,"strategy").then(c=>setUsage(u=>({...u,strategy:c})));
+    }
+  },[user]);
+
+  const FREE_LIMIT = 5;
+
+  const saveName = async () => {
+    if(!name.trim()){setMsg({type:"error",text:"Name cannot be empty."});return;}
+    setSaving(true);
+    const {error} = await sbUpdateProfile(user.id, {name: name.trim()});
+    if(error){setMsg({type:"error",text:error});}
+    else{setUser({...user,name:name.trim()});setMsg({type:"success",text:"Name updated ✓"});}
+    setSaving(false);
+  };
+
+  const savePassword = async () => {
+    if(!newPass||!confPass){setMsg({type:"error",text:"Fill in new password fields."});return;}
+    if(newPass.length<8){setMsg({type:"error",text:"Password must be at least 8 characters."});return;}
+    if(newPass!==confPass){setMsg({type:"error",text:"Passwords do not match."});return;}
+    setSaving(true);
+    const {error} = await supabase.auth.updateUser({password: newPass});
+    if(error){setMsg({type:"error",text:error.message});}
+    else{setMsg({type:"success",text:"Password updated ✓"});setNewPass("");setConfPass("");setCurPass("");}
+    setSaving(false);
+  };
+
+  const roleColor = r => r==="admin"?"#60a5fa":r==="pro"?"#a78bfa":G.muted;
+
+  return <div style={{color:G.text,minHeight:"90vh",background:G.bg}}>
+    <div style={{background:`linear-gradient(180deg,#030d22,${G.bg})`,borderBottom:`1px solid ${G.border}`,padding:"36px 24px 28px",textAlign:"center"}}>
+      <div style={{fontFamily:G.mono,fontSize:9,color:G.gold,letterSpacing:"0.2em",marginBottom:8}}>MY ACCOUNT</div>
+      <div style={{width:64,height:64,borderRadius:"50%",background:G.gold+"22",border:`2px solid ${G.gold}44`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:G.serif,fontSize:26,color:G.gold,fontWeight:700,margin:"0 auto 12px"}}>{user?.name?.charAt(0).toUpperCase()}</div>
+      <h1 style={{fontFamily:G.serif,fontSize:24,color:G.goldLight,margin:"0 0 6px"}}>{user?.name}</h1>
+      <div style={{display:"flex",gap:8,justifyContent:"center",alignItems:"center"}}>
+        <span style={{fontFamily:G.mono,fontSize:11,color:G.muted}}>{user?.email}</span>
+        <RoleBadge role={user?.role||"free"}/>
+      </div>
+    </div>
+
+    <div style={{maxWidth:560,margin:"28px auto",padding:"0 16px"}}>
+      {msg&&<div style={{marginBottom:14,background:msg.type==="error"?G.redDim:G.greenDim,border:`1px solid ${msg.type==="error"?G.redBorder:G.greenBorder}`,borderRadius:8,padding:"11px 14px",fontFamily:G.mono,fontSize:12,color:msg.type==="error"?G.red:G.green}}>{msg.text}</div>}
+
+      {/* Usage today */}
+      <Card style={{marginBottom:16}}>
+        <div style={{fontFamily:G.serif,fontSize:14,color:G.goldLight,marginBottom:14}}>📊 Today's Usage</div>
+        {[["Analyzer",usage.analyzer],["Strategy Builder",usage.strategy]].map(([label,count])=>(
+          <div key={label} style={{marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+              <span style={{fontFamily:G.mono,fontSize:11,color:G.muted}}>{label}</span>
+              <span style={{fontFamily:G.mono,fontSize:11,color:user?.isPro?G.green:count>=FREE_LIMIT?G.red:G.gold}}>
+                {user?.isPro ? "Unlimited" : `${count} / ${FREE_LIMIT}`}
+              </span>
+            </div>
+            {!user?.isPro&&<div style={{height:4,background:G.faint,borderRadius:2}}>
+              <div style={{height:"100%",width:`${Math.min(count/FREE_LIMIT,1)*100}%`,background:count>=FREE_LIMIT?G.red:G.gold,borderRadius:2,transition:"width 0.4s"}}/>
+            </div>}
+          </div>
+        ))}
+        {!user?.isPro&&<div style={{marginTop:14,padding:"10px 14px",background:"#1a0a40",border:"1px solid #a78bfa44",borderRadius:8,fontFamily:G.mono,fontSize:10,color:"#a78bfa"}}>
+          ✨ Upgrade to Pro for unlimited access — contact admin@elitetrades.com
+        </div>}
+      </Card>
+
+      {/* Edit name */}
+      <Card style={{marginBottom:16}}>
+        <div style={{fontFamily:G.serif,fontSize:14,color:G.goldLight,marginBottom:14}}>✏️ Edit Profile</div>
+        <div style={{marginBottom:14}}><Label>DISPLAY NAME</Label><TextInput value={name} onChange={e=>setName(e.target.value)} placeholder="Your name"/></div>
+        <Btn onClick={saveName} disabled={saving} variant="primary">SAVE NAME</Btn>
+      </Card>
+
+      {/* Change password */}
+      <Card style={{marginBottom:16}}>
+        <div style={{fontFamily:G.serif,fontSize:14,color:G.goldLight,marginBottom:14}}>🔒 Change Password</div>
+        <div style={{marginBottom:12}}><Label>NEW PASSWORD</Label><TextInput type="password" value={newPass} onChange={e=>setNewPass(e.target.value)} placeholder="Min. 8 characters"/></div>
+        <div style={{marginBottom:16}}><Label>CONFIRM NEW PASSWORD</Label><TextInput type="password" value={confPass} onChange={e=>setConfPass(e.target.value)} placeholder="Re-enter new password"/></div>
+        <Btn onClick={savePassword} disabled={saving} variant="primary">UPDATE PASSWORD</Btn>
+      </Card>
+
+      <div style={{textAlign:"center",marginTop:8}}>
+        <Btn onClick={()=>setPage("home")} variant="ghost" size="sm">← BACK TO HOME</Btn>
+      </div>
+    </div>
+    <div style={{height:40}}/>
+  </div>;
 }
 
 function AuthShell({title,subtitle,children}){
@@ -372,60 +524,84 @@ function AuthShell({title,subtitle,children}){
 function LoginPage({setPage,onLogin}){
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
   const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
+  const [resetSent,setResetSent]=useState(false); const [resetting,setResetting]=useState(false);
+
   const handle=async()=>{
     setErr("");setLoading(true);
     if(!email||!pass){setErr("Please fill in all fields.");setLoading(false);return;}
-    const users=await getUsers(); const user=users[email.toLowerCase()];
-    if(!user){setErr("No account found. Please sign up first, or use admin@elitetrades.com / EliteTrades1!");setLoading(false);return;}
-    if(user.password!==btoa(pass)){setErr("Incorrect password.");setLoading(false);return;}
-    const s={name:user.name,email:user.email,isAdmin:!!user.isAdmin};
-    await saveSession(s);onLogin(s);setLoading(false);
+    const {data,error}=await sbSignIn(email.trim().toLowerCase(),pass);
+    if(error){setErr(error);setLoading(false);return;}
+    const profile=await sbGetProfile(data.user.id);
+    const u={id:data.user.id,name:profile?.name||email.split("@")[0],email:data.user.email,role:profile?.role||"free",isAdmin:profile?.role==="admin",isPro:profile?.role==="pro"||profile?.role==="admin"};
+    onLogin(u);setLoading(false);
   };
-  return <AuthShell title="Welcome Back" subtitle="Sign in to access the Strategy Analyzer">
+
+  const handleReset=async()=>{
+    if(!email){setErr("Enter your email above first.");return;}
+    setResetting(true);
+    const {error}=await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(),{redirectTo:`${window.location.origin}${window.location.pathname}`});
+    setResetting(false);
+    if(error){setErr(error.message);}else{setResetSent(true);}
+  };
+
+  return <AuthShell title="Welcome Back" subtitle="Sign in to your Elite Trades account">
     <div style={{marginBottom:14}}><Label>EMAIL</Label><TextInput placeholder="trader@example.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()}/></div>
-    <div style={{marginBottom:20}}><Label>PASSWORD</Label><TextInput type="password" placeholder="••••••••" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()}/></div>
+    <div style={{marginBottom:6}}><Label>PASSWORD</Label><TextInput type="password" placeholder="••••••••" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()}/></div>
+    <div style={{textAlign:"right",marginBottom:18}}>
+      <span onClick={handleReset} style={{fontFamily:G.mono,fontSize:10,color:resetting?G.muted:G.gold,cursor:"pointer",textDecoration:"underline"}}>{resetting?"Sending...":"Forgot password?"}</span>
+    </div>
+    {resetSent&&<div style={{background:G.greenDim,border:`1px solid ${G.greenBorder}`,borderRadius:6,padding:"10px 14px",marginBottom:14,fontFamily:G.mono,fontSize:11,color:G.green}}>✓ Password reset email sent. Check your inbox.</div>}
     {err&&<div style={{background:G.redDim,border:`1px solid ${G.redBorder}`,borderRadius:6,padding:"10px 14px",marginBottom:14,fontFamily:G.mono,fontSize:11,color:G.red}}>⚠ {err}</div>}
     <Btn onClick={handle} disabled={loading} variant="primary" size="lg" style={{width:"100%"}}>{loading?"SIGNING IN...":"SIGN IN →"}</Btn>
-    <div style={{textAlign:"center",marginTop:16,fontFamily:G.mono,fontSize:11,color:G.muted}}>No account? <span onClick={()=>setPage("signup")} style={{color:G.gold,cursor:"pointer",textDecoration:"underline"}}>Create one</span></div>
-    <div style={{marginTop:18,padding:"12px 14px",background:G.gold+"08",border:`1px solid ${G.gold}22`,borderRadius:8,textAlign:"center"}}>
-      <div style={{fontFamily:G.mono,fontSize:9,color:G.gold+"88",letterSpacing:"0.15em",marginBottom:6}}>DEFAULT ADMIN CREDENTIALS</div>
-      <div style={{fontFamily:G.mono,fontSize:11,color:G.muted}}>Email: <span style={{color:G.goldLight}}>admin@elitetrades.com</span></div>
-      <div style={{fontFamily:G.mono,fontSize:11,color:G.muted,marginTop:3}}>Password: <span style={{color:G.goldLight}}>EliteTrades1!</span></div>
-      <div style={{fontFamily:G.mono,fontSize:9,color:G.faint,marginTop:8}}>Change after first login by creating a new account</div>
-    </div>
+    <div style={{textAlign:"center",marginTop:16,fontFamily:G.mono,fontSize:11,color:G.muted}}>No account? <span onClick={()=>setPage("signup")} style={{color:G.gold,cursor:"pointer",textDecoration:"underline"}}>Create one free</span></div>
   </AuthShell>;
 }
 
 function SignupPage({setPage,onLogin}){
   const [name,setName]=useState(""); const [email,setEmail]=useState("");
   const [pass,setPass]=useState(""); const [conf,setConf]=useState("");
-  const [agree,setAgree]=useState(false); const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
+  const [agree,setAgree]=useState(false); const [err,setErr]=useState("");
+  const [loading,setLoading]=useState(false); const [verifyNeeded,setVerifyNeeded]=useState(false);
+
   const handle=async()=>{
     setErr("");setLoading(true);
     if(!name||!email||!pass||!conf){setErr("Please fill in all fields.");setLoading(false);return;}
     if(!email.includes("@")){setErr("Enter a valid email.");setLoading(false);return;}
-    if(pass.length<6){setErr("Password must be at least 6 characters.");setLoading(false);return;}
+    if(pass.length<8){setErr("Password must be at least 8 characters.");setLoading(false);return;}
     if(pass!==conf){setErr("Passwords do not match.");setLoading(false);return;}
     if(!agree){setErr("You must agree to the disclaimer.");setLoading(false);return;}
-    const users=await getUsers();
-    if(users[email.toLowerCase()]){setErr("Account already exists.");setLoading(false);return;}
-    const isFirst=Object.keys(users).length===0;
-    users[email.toLowerCase()]={name:name.trim(),email:email.toLowerCase(),password:btoa(pass),isAdmin:isFirst,createdAt:new Date().toISOString()};
-    await saveUsers(users);
-    const s={name:name.trim(),email:email.toLowerCase(),isAdmin:isFirst};
-    await saveSession(s);onLogin(s);setLoading(false);
+    const {data,error}=await sbSignUp(email.trim().toLowerCase(),pass,name.trim());
+    if(error){setErr(error);setLoading(false);return;}
+    // If email confirmation is enabled, show verify message; otherwise auto-login
+    if(data?.session){
+      const profile=await sbGetProfile(data.user.id);
+      const u={id:data.user.id,name:profile?.name||name.trim(),email:data.user.email,role:profile?.role||"free",isAdmin:profile?.role==="admin",isPro:profile?.role==="pro"||profile?.role==="admin"};
+      onLogin(u);
+    } else {
+      setVerifyNeeded(true);
+    }
+    setLoading(false);
   };
-  return <AuthShell title="Create Your Account" subtitle={<>AI trade education access · <span style={{color:G.gold}}>First account = Admin</span></>}>
+
+  if(verifyNeeded) return <AuthShell title="Check Your Email" subtitle="One more step to activate your account">
+    <div style={{textAlign:"center",padding:"20px 0"}}>
+      <div style={{fontSize:48,marginBottom:16}}>📧</div>
+      <p style={{fontFamily:G.mono,fontSize:12,color:G.muted,lineHeight:1.9,marginBottom:20}}>We sent a verification link to <span style={{color:G.goldLight}}>{email}</span>. Click it to activate your account, then sign in.</p>
+      <Btn onClick={()=>setPage("login")} variant="primary" size="lg">GO TO SIGN IN →</Btn>
+    </div>
+  </AuthShell>;
+
+  return <AuthShell title="Create Your Account" subtitle="Free access to AI-powered trade education">
     <div style={{marginBottom:12}}><Label>FULL NAME</Label><TextInput placeholder="John Trader" value={name} onChange={e=>setName(e.target.value)}/></div>
     <div style={{marginBottom:12}}><Label>EMAIL</Label><TextInput placeholder="trader@example.com" value={email} onChange={e=>setEmail(e.target.value)}/></div>
-    <div style={{marginBottom:12}}><Label>PASSWORD</Label><TextInput type="password" placeholder="Min. 6 characters" value={pass} onChange={e=>setPass(e.target.value)}/></div>
+    <div style={{marginBottom:12}}><Label>PASSWORD</Label><TextInput type="password" placeholder="Min. 8 characters" value={pass} onChange={e=>setPass(e.target.value)}/></div>
     <div style={{marginBottom:16}}><Label>CONFIRM PASSWORD</Label><TextInput type="password" placeholder="Re-enter password" value={conf} onChange={e=>setConf(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()}/></div>
     <div onClick={()=>setAgree(!agree)} style={{display:"flex",gap:10,alignItems:"flex-start",cursor:"pointer",marginBottom:18,background:agree?G.gold+"0d":"#030d1e",border:`1px solid ${agree?G.gold+"44":G.border}`,borderRadius:8,padding:"11px 13px",transition:"all 0.2s"}}>
       <div style={{minWidth:16,height:16,borderRadius:3,marginTop:1,background:agree?`linear-gradient(135deg,${G.gold},${G.goldLight})`:"transparent",border:`1px solid ${agree?G.gold:"#444"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:G.bg,fontWeight:900}}>{agree?"✓":""}</div>
       <span style={{fontFamily:G.mono,fontSize:11,color:G.muted,lineHeight:1.7}}>I understand Elite Trades provides <span style={{color:G.gold}}>educational content only</span>, not financial advice.</span>
     </div>
     {err&&<div style={{background:G.redDim,border:`1px solid ${G.redBorder}`,borderRadius:6,padding:"10px 14px",marginBottom:12,fontFamily:G.mono,fontSize:11,color:G.red}}>⚠ {err}</div>}
-    <Btn onClick={handle} disabled={loading} variant="primary" size="lg" style={{width:"100%"}}>{loading?"CREATING...":"CREATE ACCOUNT →"}</Btn>
+    <Btn onClick={handle} disabled={loading} variant="primary" size="lg" style={{width:"100%"}}>{loading?"CREATING ACCOUNT...":"CREATE FREE ACCOUNT →"}</Btn>
     <div style={{textAlign:"center",marginTop:16,fontFamily:G.mono,fontSize:11,color:G.muted}}>Have an account? <span onClick={()=>setPage("login")} style={{color:G.gold,cursor:"pointer",textDecoration:"underline"}}>Sign in</span></div>
   </AuthShell>;
 }
@@ -1126,6 +1302,23 @@ function AdminPage({user}){
   const [saving,setSaving]=useState(false); const [toast,setToast]=useState(null);
   const [activeTab,setActiveTab]=useState("daily"); const [showAdd,setShowAdd]=useState(false);
   const [newAsset,setNewAsset]=useState({symbol:"",name:"",type:"Crypto",active:true}); const [addErr,setAddErr]=useState("");
+  const [adminSection,setAdminSection]=useState("assets"); // "assets" | "users"
+  const [users,setUsers]=useState([]); const [usersLoading,setUsersLoading]=useState(false);
+  const [roleUpdating,setRoleUpdating]=useState(null);
+
+  const loadUsers=useCallback(async()=>{
+    setUsersLoading(true);
+    const all=await sbGetAllUsers();
+    setUsers(all);setUsersLoading(false);
+  },[]);
+
+  const changeRole=async(userId,role)=>{
+    setRoleUpdating(userId);
+    const {error}=await sbUpdateUserRole(userId,role);
+    if(!error){setUsers(u=>u.map(x=>x.id===userId?{...x,role}:x));showToast(`Role updated to ${role} ✓`);}
+    else{showToast("Failed to update role","error");}
+    setRoleUpdating(null);
+  };
 
   useEffect(()=>{getAssetConfig().then(cfg=>{setConfig(cfg);setLoading(false);});},[]);
 
@@ -1173,12 +1366,14 @@ function AdminPage({user}){
               <div style={{fontFamily:G.mono,fontSize:9,color:"#60a5fa",letterSpacing:"0.2em"}}>⚙ ADMIN DASHBOARD</div>
               <Badge label="RESTRICTED" color="#60a5fa"/>
             </div>
-            <h1 style={{fontFamily:G.serif,fontSize:"clamp(18px,3.5vw,30px)",color:G.goldLight,margin:"0 0 5px"}}>Asset List Manager</h1>
-            <p style={{fontFamily:G.mono,fontSize:11,color:G.muted,margin:0}}>Manage assets for the automated X post scheduler</p>
+            <h1 style={{fontFamily:G.serif,fontSize:"clamp(18px,3.5vw,30px)",color:G.goldLight,margin:"0 0 5px"}}>Admin Panel</h1>
+            <p style={{fontFamily:G.mono,fontSize:11,color:G.muted,margin:0}}>Manage users, roles, and bot asset list</p>
           </div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <Btn onClick={exportConfig} variant="outline" size="sm">⬇ EXPORT JSON</Btn>
-            <Btn onClick={async()=>{if(!window.confirm("Reset to defaults?"))return;await save({daily:DEFAULT_DAILY,weekly:DEFAULT_WEEKLY});showToast("Reset ✓");}} variant="ghost" size="sm">↺ RESET</Btn>
+            {adminSection==="assets"&&<><Btn onClick={exportConfig} variant="outline" size="sm">⬇ EXPORT JSON</Btn>
+            <Btn onClick={async()=>{if(!window.confirm("Reset to defaults?"))return;await save({daily:DEFAULT_DAILY,weekly:DEFAULT_WEEKLY});showToast("Reset ✓");}} variant="ghost" size="sm">↺ RESET</Btn></>}
+            <Btn onClick={()=>setAdminSection("users")} variant={adminSection==="users"?"primary":"outline"} size="sm">👥 USERS</Btn>
+            <Btn onClick={()=>setAdminSection("assets")} variant={adminSection==="assets"?"primary":"outline"} size="sm">📋 ASSETS</Btn>
           </div>
         </div>
         <div style={{display:"flex",gap:12,marginTop:20,flexWrap:"wrap"}}>
@@ -1193,6 +1388,42 @@ function AdminPage({user}){
     </div>
 
     <div style={{maxWidth:900,margin:"24px auto",padding:"0 20px"}}>
+
+      {/* ── USERS PANEL ─────────────────────────────────── */}
+      {adminSection==="users"&&<div>
+        {usersLoading?<div style={{textAlign:"center",padding:40}}><div style={{display:"inline-block",width:32,height:32,borderRadius:"50%",border:`2px solid ${G.gold}22`,borderTop:`2px solid ${G.gold}`,animation:"spin 1s linear infinite"}}/></div>:(
+          <div>
+            <div style={{fontFamily:G.mono,fontSize:9,color:G.muted,letterSpacing:"0.1em",marginBottom:12}}>{users.length} REGISTERED USERS</div>
+            {users.map(u=>{
+              const roleColor=u.role==="admin"?"#60a5fa":u.role==="pro"?"#a78bfa":G.muted;
+              return <div key={u.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 18px",background:G.bg3,border:`1px solid ${G.border}`,borderRadius:8,marginBottom:8,flexWrap:"wrap"}}>
+                <div style={{width:34,height:34,borderRadius:"50%",background:roleColor+"22",border:`1px solid ${roleColor}44`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:G.serif,fontSize:14,color:roleColor,fontWeight:700,flexShrink:0}}>
+                  {(u.name||u.email||"?").charAt(0).toUpperCase()}
+                </div>
+                <div style={{flex:1,minWidth:160}}>
+                  <div style={{fontFamily:G.mono,fontSize:12,color:G.text,fontWeight:700}}>{u.name||"—"}</div>
+                  <div style={{fontFamily:G.mono,fontSize:10,color:G.muted,marginTop:2}}>{u.email}</div>
+                </div>
+                <div style={{fontFamily:G.mono,fontSize:9,color:G.muted}}>{u.created_at?new Date(u.created_at).toLocaleDateString():""}</div>
+                <select
+                  value={u.role||"free"}
+                  disabled={roleUpdating===u.id||u.id===user.id}
+                  onChange={e=>changeRole(u.id,e.target.value)}
+                  style={{background:G.bg4,border:`1px solid ${roleColor}55`,borderRadius:6,padding:"6px 10px",color:roleColor,fontFamily:G.mono,fontSize:10,cursor:"pointer",outline:"none"}}>
+                  <option value="free">Free</option>
+                  <option value="pro">Pro</option>
+                  <option value="admin">Admin</option>
+                </select>
+                {roleUpdating===u.id&&<span style={{fontFamily:G.mono,fontSize:9,color:G.muted}}>saving...</span>}
+                {u.id===user.id&&<span style={{fontFamily:G.mono,fontSize:9,color:G.faint}}>(you)</span>}
+              </div>;
+            })}
+          </div>
+        )}
+      </div>}
+
+      {/* ── ASSETS PANEL ────────────────────────────────── */}
+      {adminSection==="assets"&&<div>
       <div style={{background:"#030d22",border:`1px solid #60a5fa33`,borderRadius:10,padding:"14px 18px",marginBottom:20}}>
         <div style={{fontFamily:G.mono,fontSize:9,color:"#60a5fa",letterSpacing:"0.15em",marginBottom:6}}>ℹ BOT SYNC</div>
         <p style={{fontFamily:G.mono,fontSize:11,color:G.muted,lineHeight:1.8,margin:0}}>Edit below → click <span style={{color:G.gold}}>EXPORT JSON</span> → commit <code style={{color:G.green}}>config/assets.json</code> to your repo → bot reads it automatically.</p>
@@ -1247,6 +1478,7 @@ function AdminPage({user}){
         <div style={{fontFamily:G.mono,fontSize:11,color:G.gold+"aa"}}>💾 Changes saved. Export & commit <code style={{color:G.goldLight}}>assets.json</code> to sync the bot.</div>
         <Btn onClick={exportConfig} variant="primary" size="sm">⬇ EXPORT JSON</Btn>
       </div>
+    </div>}
     </div>
     <div style={{height:40}}/>
   </div>;
@@ -1270,11 +1502,31 @@ export default function App(){
   const [user,setUser]=useState(null);
   const [booting,setBooting]=useState(true);
 
-  useEffect(()=>{getSession().then(s=>{if(s)setUser(s);setBooting(false);});},[]);
+  useEffect(()=>{
+    if(!supabase){setBooting(false);return;}
+    // Get initial session
+    supabase.auth.getSession().then(async({data:{session}})=>{
+      if(session){
+        const profile=await sbGetProfile(session.user.id);
+        setUser({id:session.user.id,name:profile?.name||session.user.email.split("@")[0],email:session.user.email,role:profile?.role||"free",isAdmin:profile?.role==="admin",isPro:profile?.role==="pro"||profile?.role==="admin"});
+      }
+      setBooting(false);
+    });
+    // Listen for auth changes
+    const {data:{subscription}}=supabase.auth.onAuthStateChange(async(event,session)=>{
+      if(event==="SIGNED_OUT"||!session){setUser(null);}
+      else if(session){
+        const profile=await sbGetProfile(session.user.id);
+        setUser({id:session.user.id,name:profile?.name||session.user.email.split("@")[0],email:session.user.email,role:profile?.role||"free",isAdmin:profile?.role==="admin",isPro:profile?.role==="pro"||profile?.role==="admin"});
+      }
+    });
+    return()=>subscription.unsubscribe();
+  },[]);
+
   useEffect(()=>{window.scrollTo(0,0);},[page]);
 
   const handleLogin=(u)=>{setUser(u);setPage(u.isAdmin?"admin":"analyzer");};
-  const handleLogout=async()=>{await saveSession(null);setUser(null);setPage("home");};
+  const handleLogout=async()=>{await sbSignOut();setUser(null);setPage("home");};
 
   if(booting)return <div style={{background:G.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
     <div style={{textAlign:"center"}}>
@@ -1295,6 +1547,7 @@ export default function App(){
     <Nav page={page} setPage={setPage} user={user} onLogout={handleLogout}/>
     {page==="login"&&<LoginPage setPage={setPage} onLogin={handleLogin}/>}
     {page==="signup"&&<SignupPage setPage={setPage} onLogin={handleLogin}/>}
+    {page==="profile"&&(user?<ProfilePage user={user} setUser={setUser} setPage={setPage}/>:<AccessGate setPage={setPage}/>)}
     {page==="analyzer"&&(user?<AnalyzerPage user={user}/>:<AccessGate setPage={setPage}/>)}
     {page==="strategy"&&<StrategyPage user={user} setPage={setPage}/>}
     {page==="admin"&&<AdminPage user={user}/>}
