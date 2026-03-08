@@ -578,7 +578,7 @@ Return ONLY a single valid JSON object — no markdown, no extra text. Keep ever
     <div style={{background:`linear-gradient(180deg,#030d22,${G.bg})`,borderBottom:`1px solid ${G.border}`,padding:"36px 24px 28px",textAlign:"center"}}>
       <div style={{fontFamily:G.mono,fontSize:9,color:G.gold,letterSpacing:"0.2em",marginBottom:8}}>AI STRATEGY ENGINE</div>
       <h1 style={{fontFamily:G.serif,fontSize:"clamp(18px,4vw,36px)",color:G.goldLight,margin:"0 0 7px"}}>Asset Strategy Analyzer</h1>
-      <p style={{fontFamily:G.mono,fontSize:11,color:G.muted,maxWidth:440,margin:"0 auto"}}>AI-generated trade strategy + options flow analysis for any asset</p>
+      <p style={{fontFamily:G.mono,fontSize:11,color:G.muted,maxWidth:440,margin:"0 auto"}}>AI-generated trade strategy and market analysis for any asset</p>
       {user&&<div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:10,background:G.gold+"0d",border:`1px solid ${G.gold}33`,borderRadius:100,padding:"3px 10px",fontFamily:G.mono,fontSize:9,color:G.gold+"bb"}}><span style={{color:G.gold}}>◆</span>Logged in as {user.name}</div>}
     </div>
     <div style={{maxWidth:720,margin:"28px auto",padding:"0 16px"}}>
@@ -600,7 +600,7 @@ Return ONLY a single valid JSON object — no markdown, no extra text. Keep ever
       {err&&<div style={{marginTop:12,background:G.redDim,border:`1px solid ${G.redBorder}`,borderRadius:8,padding:"11px 14px",fontFamily:G.mono,fontSize:12,color:G.red}}>{err}</div>}
       {loading&&<div style={{textAlign:"center",padding:"40px 0"}}>
         <div style={{display:"inline-block",width:38,height:38,borderRadius:"50%",border:`2px solid ${G.gold}22`,borderTop:`2px solid ${G.gold}`,animation:"spin 1s linear infinite"}}/>
-        <div style={{fontFamily:G.mono,fontSize:11,color:G.muted,marginTop:12}}>Analyzing price action & options flow...</div>
+        <div style={{fontFamily:G.mono,fontSize:11,color:G.muted,marginTop:12}}>Analyzing market conditions...</div>
       </div>}
 
       {result&&<div ref={resultRef} style={{marginTop:22}}>
@@ -988,10 +988,10 @@ Return ONLY a single valid JSON object — no markdown, no preamble. Keep string
     <div style={{color:G.text, minHeight:"90vh", background:G.bg}}>
       {/* Hero */}
       <div style={{background:`linear-gradient(180deg,#030d22,${G.bg})`,borderBottom:`1px solid #a78bfa33`,padding:"36px 24px 28px",textAlign:"center"}}>
-        <div style={{fontFamily:G.mono,fontSize:9,color:"#a78bfa",letterSpacing:"0.2em",marginBottom:8}}>AI-POWERED · OPTIONS FLOW · DARK POOL</div>
+        <div style={{fontFamily:G.mono,fontSize:9,color:"#a78bfa",letterSpacing:"0.2em",marginBottom:8}}>AI-POWERED · MARKET INTELLIGENCE</div>
         <h1 style={{fontFamily:G.serif,fontSize:"clamp(20px,4vw,40px)",color:G.goldLight,margin:"0 0 8px"}}>Options Strategy Builder</h1>
         <p style={{fontFamily:G.mono,fontSize:11,color:G.muted,maxWidth:500,margin:"0 auto 12px"}}>
-          Enter any ticker to receive AI-generated options strategies ranked by price action, options flow, and dark pool data
+          Enter any ticker to receive AI-generated options strategies ranked by price action and market intelligence
         </p>
         {!user && (
           <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"#a78bfa18",border:"1px solid #a78bfa44",borderRadius:100,padding:"5px 14px",fontFamily:G.mono,fontSize:10,color:"#a78bfa",cursor:"pointer"}} onClick={()=>setPage("signup")}>
@@ -1018,7 +1018,7 @@ Return ONLY a single valid JSON object — no markdown, no preamble. Keep string
             </Btn>
           </div>
           <div style={{display:"flex",gap:16,marginTop:14,flexWrap:"wrap"}}>
-            {[["📈 Price Action","Technical trend analysis"],["🎯 Options Flow","Unusual activity signals"],["🌑 Dark Pool","Institutional block prints"],["⚡ 3 Strategies","Short / Medium / Long term"]].map(([icon,desc])=>(
+            {[["📈 Price Action","Technical trend analysis"],["🎯 Market Intelligence","Institutional signals"],["⚡ 3 Strategies","Short / Medium / Long term"],["🛡️ Risk Management","Entry, exit & sizing"]].map(([icon,desc])=>(
               <div key={icon} style={{display:"flex",alignItems:"center",gap:6}}>
                 <span style={{fontFamily:G.mono,fontSize:10,color:G.gold}}>{icon}</span>
                 <span style={{fontFamily:G.mono,fontSize:9,color:G.muted}}>{desc}</span>
@@ -1032,7 +1032,7 @@ Return ONLY a single valid JSON object — no markdown, no preamble. Keep string
         {loading && (
           <div style={{textAlign:"center",padding:"60px 0"}}>
             <div style={{display:"inline-block",width:44,height:44,borderRadius:"50%",border:`2px solid #a78bfa22`,borderTop:"2px solid #a78bfa",animation:"spin 1s linear infinite"}}/>
-            <div style={{fontFamily:G.mono,fontSize:11,color:G.muted,marginTop:14}}>Scanning price action, options flow & dark pool data...</div>
+            <div style={{fontFamily:G.mono,fontSize:11,color:G.muted,marginTop:14}}>Scanning market data & building strategies...</div>
             <div style={{fontFamily:G.mono,fontSize:9,color:G.faint,marginTop:6}}>Building 3 strategies — this may take a few seconds</div>
           </div>
         )}
@@ -1061,8 +1061,8 @@ Return ONLY a single valid JSON object — no markdown, no preamble. Keep string
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
                 {[
                   {label:"PRICE ACTION", text:result.priceAction, color:G.gold},
-                  {label:"OPTIONS FLOW", text:result.optionsFlowSummary, color:G.blue},
-                  {label:"DARK POOL", text:result.darkPoolSummary, color:"#a78bfa"},
+                  {label:"MARKET SIGNALS", text:result.optionsFlowSummary, color:G.blue},
+                  {label:"INSTITUTIONAL", text:result.darkPoolSummary, color:"#a78bfa"},
                 ].map(({label,text,color})=>(
                   <div key={label} style={{background:G.bg2,borderRadius:8,padding:"12px 14px",border:`1px solid ${color}22`}}>
                     <div style={{fontFamily:G.mono,fontSize:8,color:color,letterSpacing:"0.15em",marginBottom:5}}>{label}</div>
