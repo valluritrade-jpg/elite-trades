@@ -78,17 +78,12 @@ async function sbSignOut() {
 async function sbGetProfile(userId) {
   if (!supabase) return null;
   try {
-    // Try up to 3 times with delay
-    for (let i = 0; i < 3; i++) {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", userId)
-        .maybeSingle();
-      if (data) return data;
-      if (i < 2) await new Promise(r => setTimeout(r, 800));
-    }
-    return null;
+    const { data } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+    return data || null;
   } catch(e) { return null; }
 }
 
@@ -556,9 +551,14 @@ function LoginPage({setPage,onLogin}){
     if(!email||!pass){setErr("Please fill in all fields.");setLoading(false);return;}
     const {data,error}=await sbSignIn(email.trim().toLowerCase(),pass);
     if(error){setErr(error);setLoading(false);return;}
-    const profile=await sbGetProfile(data.user.id);
-    const u=buildUser(data.user, profile);
-    onLogin(u);setLoading(false);
+    // Navigate immediately with basic info, profile loads via onAuthStateChange
+    const u=buildUser(data.user, null);
+    onLogin(u);
+    // Fetch profile in background and update role
+    sbGetProfile(data.user.id).then(profile=>{
+      if(profile) onLogin(buildUser(data.user, profile));
+    });
+    setLoading(false);
   };
 
   const handleReset=async()=>{
