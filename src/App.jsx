@@ -106,7 +106,6 @@ async function sbGetProfile(userId) {
 
 // Build user object from session + profile (with safe fallback if profile missing)
 function buildUser(sessionUser, profile) {
-  console.log("buildUser — profile:", profile, "session:", sessionUser?.id);
   const role = profile?.role || "free";
   return {
     id: sessionUser.id,
@@ -116,6 +115,30 @@ function buildUser(sessionUser, profile) {
     isAdmin: role === "admin",
     isPro: role === "pro" || role === "admin"
   };
+}
+
+// Temporary debug component — remove after role issue is resolved
+function DebugPanel({user}) {
+  const [dbRole, setDbRole] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(()=>{
+    if(!user?.id || !supabase) return;
+    supabase.from("profiles").select("role,email").eq("id", user.id).maybeSingle()
+      .then(({data, error})=>{
+        if(error) setErr(error.message);
+        else setDbRole(data?.role || "NOT FOUND");
+      });
+  },[user]);
+  if(!user) return null;
+  return (
+    <div style={{position:"fixed",bottom:10,right:10,zIndex:9999,background:"#000d1a",border:"1px solid #4f9cf9",borderRadius:8,padding:"10px 14px",fontFamily:"monospace",fontSize:11,color:"#e0eeff",maxWidth:300}}>
+      <div style={{color:"#4f9cf9",marginBottom:4}}>🔍 AUTH DEBUG</div>
+      <div>User ID: <span style={{color:"#a8d4ff"}}>{user.id?.slice(0,8)}...</span></div>
+      <div>UI Role: <span style={{color:user.role==="admin"?"#34d399":"#f87171"}}>{user.role}</span></div>
+      <div>DB Role: <span style={{color:dbRole==="admin"?"#34d399":"#f87171"}}>{dbRole||"loading..."}</span></div>
+      {err&&<div style={{color:"#f87171"}}>Error: {err}</div>}
+    </div>
+  );
 }
 
 async function sbUpdateProfile(userId, updates) {
@@ -568,8 +591,8 @@ function LoginPage({setPage,onLogin}){
     if(!email||!pass){setErr("Please fill in all fields.");setLoading(false);return;}
     const {data,error}=await sbSignIn(email.trim().toLowerCase(),pass);
     if(error){setErr(error);setLoading(false);return;}
+    // onAuthStateChange in App root handles everything from here
     setLoading(false);
-    onLogin(data.user);
   };
 
   const handleReset=async()=>{
@@ -610,7 +633,7 @@ function SignupPage({setPage,onLogin}){
     if(error){setErr(error);setLoading(false);return;}
     // If email confirmation is enabled, show verify message; otherwise auto-login
     if(data?.session){
-      onLogin(data.user);
+      // onAuthStateChange handles login from here
     } else {
       setVerifyNeeded(true);
     }
@@ -1539,24 +1562,30 @@ export default function App(){
   useEffect(()=>{
     if(!supabase){setBooting(false);return;}
     // Get initial session
-    // Hard timeout — never stay stuck on loading screen
-    const bootTimeout = setTimeout(() => setBooting(false), 5000);
+    const bootTimeout = setTimeout(() => setBooting(false), 6000);
 
-    supabase.auth.getSession().then(async({data:{session}})=>{
-      if(session){
-        const profile=await sbGetProfile(session.user.id);
-        setUser(buildUser(session.user, profile));
-      }
-      clearTimeout(bootTimeout);
-      setBooting(false);
-    }).catch(()=>{ clearTimeout(bootTimeout); setBooting(false); });
-
-    // Listen for auth changes
+    // onAuthStateChange is the single source of truth for all auth state
     const {data:{subscription}}=supabase.auth.onAuthStateChange(async(event,session)=>{
-      if(event==="SIGNED_OUT"||!session){ setUser(null); }
-      else if(event==="SIGNED_IN"||event==="TOKEN_REFRESHED"||event==="USER_UPDATED"){
+      console.log("auth event:", event, "session:", !!session);
+      if(event==="SIGNED_OUT"||!session){
+        setUser(null);
+        setBooting(false);
+        clearTimeout(bootTimeout);
+      } else if(event==="SIGNED_IN"||event==="TOKEN_REFRESHED"||event==="USER_UPDATED"||event==="INITIAL_SESSION"){
         const profile=await sbGetProfile(session.user.id);
-        setUser(buildUser(session.user, profile));
+        console.log("profile fetched:", profile);
+        const u=buildUser(session.user, profile);
+        console.log("built user:", u);
+        setUser(u);
+        // Navigate on fresh sign in
+        if(event==="SIGNED_IN"){
+          setPage(u.isAdmin?"admin":"analyzer");
+        }
+        setBooting(false);
+        clearTimeout(bootTimeout);
+      } else {
+        setBooting(false);
+        clearTimeout(bootTimeout);
       }
     });
     return()=>subscription.unsubscribe();
@@ -1564,24 +1593,7 @@ export default function App(){
 
   useEffect(()=>{window.scrollTo(0,0);},[page]);
 
-  const handleLogin=(u)=>{
-    setUser(u);
-    setPage(u.isAdmin?"admin":"analyzer");
-  };
-  const handleLoginWithProfile=async(sessionUser)=>{
-    // Set basic user first so UI unblocks
-    const basic=buildUser(sessionUser,null);
-    setUser(basic);
-    // Fetch real profile and update role
-    const profile=await sbGetProfile(sessionUser.id);
-    if(profile){
-      const full=buildUser(sessionUser,profile);
-      setUser(full);
-      setPage(full.isAdmin?"admin":"analyzer");
-    } else {
-      setPage("analyzer");
-    }
-  };
+  const handleLogin=(u)=>{ setUser(u); setPage(u.isAdmin?"admin":"analyzer"); };
   const handleLogout=async()=>{await sbSignOut();setUser(null);setPage("home");};
 
   if(booting)return <div style={{background:G.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -1601,8 +1613,9 @@ export default function App(){
     `}</style>
     <TickerTape/>
     <Nav page={page} setPage={setPage} user={user} onLogout={handleLogout}/>
-    {page==="login"&&<LoginPage setPage={setPage} onLogin={handleLoginWithProfile}/>}
-    {page==="signup"&&<SignupPage setPage={setPage} onLogin={handleLoginWithProfile}/>}
+    <DebugPanel user={user}/>
+    {page==="login"&&<LoginPage setPage={setPage} onLogin={handleLogin}/>}
+    {page==="signup"&&<SignupPage setPage={setPage} onLogin={handleLogin}/>}
     {page==="profile"&&(user?<ProfilePage user={user} setUser={setUser} setPage={setPage}/>:<AccessGate setPage={setPage}/>)}
     {page==="analyzer"&&(user?<AnalyzerPage user={user}/>:<AccessGate setPage={setPage}/>)}
     {page==="strategy"&&<StrategyPage user={user} setPage={setPage}/>}
