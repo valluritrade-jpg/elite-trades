@@ -13,19 +13,23 @@
     <style>
       html, body, #root { margin: 0; padding: 0; background: #020a18; min-height: 100vh; }
     </style>
-    <!-- GitHub Pages SPA: restore path encoded by 404.html -->
+    <!-- GitHub Pages SPA + Supabase auth callback restore -->
     <script>
       (function() {
         var search = window.location.search;
         if (search.indexOf('?p=') === 0) {
-          var path = search.slice(3).replace(/~and~/g, '&');
-          var qi = path.indexOf('&q=');
-          var query = qi !== -1 ? path.slice(qi + 3) : '';
-          path = qi !== -1 ? path.slice(0, qi) : path;
-          window.history.replaceState(null, null,
-            window.location.pathname.split('/').slice(0, 2).join('/') + '/' + path +
-            (query ? '?' + query : '') + window.location.hash
-          );
+          var params = search.slice(1); // remove leading ?
+          var parts = {};
+          params.split('&').forEach(function(part) {
+            var eq = part.indexOf('=');
+            if (eq !== -1) parts[part.slice(0, eq)] = part.slice(eq + 1);
+          });
+          var path = (parts['p'] || '/').replace(/~and~/g, '&');
+          var query = parts['q'] ? '?' + parts['q'].replace(/~and~/g, '&') : '';
+          // Restore Supabase hash (access_token, type, etc.)
+          var hash = parts['h'] ? decodeURIComponent(parts['h']) : window.location.hash;
+          var base = window.location.pathname.split('/').slice(0, 2).join('/');
+          window.history.replaceState(null, null, base + '/' + path + query + hash);
         }
       })();
     </script>

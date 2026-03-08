@@ -5,17 +5,18 @@
     <title>Elite Trades LLC</title>
     <style>html,body{margin:0;padding:0;background:#020a18;}</style>
     <script>
-      // GitHub Pages SPA redirect trick:
-      // When GH Pages hits a 404, it serves this file.
-      // We encode the full path into the URL and redirect to index.html,
-      // which then decodes it and restores the correct location.
+      // GitHub Pages SPA + Supabase auth redirect fix.
+      // Supabase sends auth tokens as hash fragments (#access_token=...).
+      // We must preserve both the path AND the full hash through the redirect.
       var l = window.location;
+      var base = l.pathname.split('/').slice(0, 2).join('/');
+      var path = l.pathname.slice(1).split('/').slice(1).join('/');
+      var search = l.search ? '&q=' + l.search.slice(1).replace(/&/g, '~and~') : '';
+      // Encode hash separately so Supabase tokens survive
+      var hash = l.hash ? '&h=' + encodeURIComponent(l.hash) : '';
       l.replace(
         l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
-        l.pathname.split('/').slice(0, 2).join('/') +
-        '/?p=/' + l.pathname.slice(1).split('/').slice(1).join('/').replace(/&/g, '~and~') +
-        (l.search ? '&q=' + l.search.slice(1).replace(/&/g, '~and~') : '') +
-        l.hash
+        base + '/?p=/' + path.replace(/&/g, '~and~') + search + hash
       );
     </script>
   </head>
