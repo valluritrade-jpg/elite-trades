@@ -83,7 +83,7 @@ async function sbSignIn(email, password) {
 
 async function sbSignOut() {
   if (!supabase) return;
-  await supabase.auth.signOut();
+  try { await supabase.auth.signOut({ scope: "global" }); } catch(e) { console.warn("signOut error:", e); }
 }
 
 async function sbGetProfile(userId) {
@@ -1595,7 +1595,13 @@ export default function App(){
   useEffect(()=>{window.scrollTo(0,0);},[page]);
 
   const handleLogin=(u)=>{ setUser(u); setPage(u.isAdmin?"admin":"analyzer"); };
-  const handleLogout=async()=>{await sbSignOut();setUser(null);setPage("home");};
+  const handleLogout=async()=>{
+    await sbSignOut();
+    setUser(null);
+    setPage("home");
+    // Force reload to clear any cached auth state
+    setTimeout(()=>window.location.reload(), 300);
+  };
 
   if(booting)return <div style={{background:G.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
     <div style={{textAlign:"center"}}>
